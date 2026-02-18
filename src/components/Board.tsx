@@ -1,7 +1,6 @@
 import type { GameState } from '../api/types';
 
 const BONUS_MAP: Record<string, string> = {};
-// Standard 15x15 Scrabble board bonus squares
 const TW = [[0,0],[0,7],[0,14],[7,0],[7,14],[14,0],[14,7],[14,14]];
 const DW = [[1,1],[1,13],[2,2],[2,12],[3,3],[3,11],[4,4],[4,10],[7,7],
             [10,4],[10,10],[11,3],[11,11],[12,2],[12,12],[13,1],[13,13]];
@@ -16,18 +15,8 @@ DW.forEach(([r,c]) => { BONUS_MAP[`${r},${c}`] = 'dw'; });
 TL.forEach(([r,c]) => { BONUS_MAP[`${r},${c}`] = 'tl'; });
 DL.forEach(([r,c]) => { BONUS_MAP[`${r},${c}`] = 'dl'; });
 
-const BONUS_COLORS: Record<string, string> = {
-  tw: '#ff3333',
-  dw: '#ffaaaa',
-  tl: '#3366ff',
-  dl: '#aaccff',
-};
-
 const BONUS_LABELS: Record<string, string> = {
-  tw: 'TW',
-  dw: 'DW',
-  tl: 'TL',
-  dl: 'DL',
+  tw: 'TW', dw: 'DW', tl: 'TL', dl: 'DL',
 };
 
 const TILE_VALUES: Record<string, number> = {
@@ -45,22 +34,17 @@ interface BoardProps {
   state: GameState | null;
   selection: BoardSelection | null;
   tileInput: string;
+  cellSize?: number;
   onSquareClick: (row: number, col: number) => void;
 }
 
-/** Convert row/col + direction to macondo coordinate string */
 export function toCoords(sel: BoardSelection): string {
-  const colLetter = String.fromCharCode(65 + sel.col); // A-O
-  const rowNum = sel.row + 1; // 1-15
-  if (sel.direction === 'across') {
-    return `${rowNum}${colLetter}`; // e.g. "8D"
-  }
-  return `${colLetter}${rowNum}`; // e.g. "D8"
+  const colLetter = String.fromCharCode(65 + sel.col);
+  const rowNum = sel.row + 1;
+  if (sel.direction === 'across') return `${rowNum}${colLetter}`;
+  return `${colLetter}${rowNum}`;
 }
 
-/**
- * Format tiles string, replacing '.' play-through markers with (LETTER) from the board.
- */
 export function formatPlayThrough(tiles: string, coords: string, board?: string[][]): string {
   if (!tiles || !board || !coords) return tiles || '';
   const acrossMatch = coords.match(/^(\d+)([A-O])$/);
@@ -85,104 +69,45 @@ export function formatPlayThrough(tiles: string, coords: string, board?: string[
   return result;
 }
 
-/**
- * Build the full move string with play-through markers (.) for existing tiles.
- * Also adjusts the starting coordinate to include any contiguous existing tiles
- * before the selection point.
- *
- * Returns { coords, tiles } ready to send to the API, or null if invalid.
- */
 export function buildMoveString(
   board: string[][],
   selection: BoardSelection,
   tileInput: string,
 ): { coords: string; tiles: string } | null {
   if (!tileInput) return null;
-
   const dim = board.length;
   const isAcross = selection.direction === 'across';
-
-  // Helper to get board letter at (r, c)
   const getCell = (r: number, c: number): string => board[r]?.[c] || '';
 
-  // 1. Scan backward from selection to find the true start of the word
   let startRow = selection.row;
   let startCol = selection.col;
   if (isAcross) {
-    while (startCol > 0 && getCell(startRow, startCol - 1) !== '') {
-      startCol--;
-    }
+    while (startCol > 0 && getCell(startRow, startCol - 1) !== '') startCol--;
   } else {
-    while (startRow > 0 && getCell(startRow - 1, startCol) !== '') {
-      startRow--;
-    }
+    while (startRow > 0 && getCell(startRow - 1, startCol) !== '') startRow--;
   }
 
-  // 2. Walk forward from the true start, building the tiles string
-  let r = startRow;
-  let c = startCol;
-  let ti = 0; // index into tileInput
-  let tiles = '';
-  let reachedSelection = false;
-
+  let r = startRow, c = startCol, ti = 0, tiles = '', reachedSelection = false;
   while (r < dim && c < dim) {
     const existing = getCell(r, c);
-
-    // Check if we've reached the selection point
-    if (r === selection.row && c === selection.col) {
-      reachedSelection = true;
-    }
-
-    if (existing) {
-      // Existing tile -> play-through marker
-      tiles += '.';
-    } else if (reachedSelection && ti < tileInput.length) {
-      // Empty square past selection -> place a typed tile
-      // Use lowercase for blanks (tiles played from '?' on rack)
-      tiles += tileInput[ti];
-      ti++;
-    } else if (!reachedSelection) {
-      // Empty square before we've reached the selection - stop scanning backward extension
-      // This shouldn't happen since we scanned backward only over existing tiles
-      break;
-    } else {
-      // No more typed tiles to place
-      break;
-    }
-
-    if (isAcross) c++;
-    else r++;
+    if (r === selection.row && c === selection.col) reachedSelection = true;
+    if (existing) { tiles += '.'; }
+    else if (reachedSelection && ti < tileInput.length) { tiles += tileInput[ti]; ti++; }
+    else if (!reachedSelection) { break; }
+    else { break; }
+    if (isAcross) c++; else r++;
   }
-
-  // 3. After placing all typed tiles, extend forward to include trailing existing tiles
   while (r < dim && c < dim) {
     const existing = getCell(r, c);
     if (!existing) break;
     tiles += '.';
-    if (isAcross) c++;
-    else r++;
+    if (isAcross) c++; else r++;
   }
-
-  if (ti < tileInput.length) {
-    // Couldn't place all tiles (ran off the board)
-    return null;
-  }
-
-  // 4. Build adjusted coordinates
-  const adjustedSelection: BoardSelection = {
-    row: startRow,
-    col: startCol,
-    direction: selection.direction,
-  };
-  const coords = toCoords(adjustedSelection);
-
+  if (ti < tileInput.length) return null;
+  const coords = toCoords({ row: startRow, col: startCol, direction: selection.direction });
   return { coords, tiles };
 }
 
-/**
- * Build a map of preview tiles: {`row,col` -> letter} for the typed input.
- * Skips over squares that already have tiles on the board.
- */
 function buildPreview(
   board: string[][] | undefined,
   selection: BoardSelection | null,
@@ -190,130 +115,161 @@ function buildPreview(
 ): Map<string, string> {
   const preview = new Map<string, string>();
   if (!selection || !tileInput || !board) return preview;
-
   const dim = board.length;
-  let r = selection.row;
-  let c = selection.col;
-  let ti = 0;
-
+  let r = selection.row, c = selection.col, ti = 0;
   while (ti < tileInput.length && r < dim && c < dim) {
     const existing = board[r]?.[c] || '';
     if (existing) {
-      // Square already has a tile — skip over it (play-through)
-      if (selection.direction === 'across') c++;
-      else r++;
+      if (selection.direction === 'across') c++; else r++;
       continue;
     }
     preview.set(`${r},${c}`, tileInput[ti]);
     ti++;
-    if (selection.direction === 'across') c++;
-    else r++;
+    if (selection.direction === 'across') c++; else r++;
   }
   return preview;
 }
 
-export function Board({ state, selection, tileInput, onSquareClick }: BoardProps) {
+// Helper to read a CSS variable value
+function v(name: string): string {
+  return `var(${name})`;
+}
+
+export function Board({ state, selection, tileInput, cellSize = 36, onSquareClick }: BoardProps) {
   const dim = state?.board?.length || 15;
-  const cellSize = 36;
+  const labelSize = Math.round(cellSize * 0.5);
   const preview = buildPreview(state?.board, selection, tileInput);
 
+  const bonusBg: Record<string, string> = {
+    tw: v('--tw'), dw: v('--dw'), tl: v('--tl'), dl: v('--dl'),
+  };
+  const bonusText: Record<string, string> = {
+    tw: v('--tw-text'), dw: v('--dw-text'), tl: v('--tl-text'), dl: v('--dl-text'),
+  };
+
   return (
-    <div style={{
-      display: 'inline-block',
-      border: '2px solid #333',
-      background: '#1a6b3c',
-      lineHeight: 0,
-    }}>
-      {Array.from({ length: dim }, (_, row) => (
-        <div key={row} style={{ display: 'flex' }}>
-          {Array.from({ length: dim }, (_, col) => {
-            const letter = state?.board?.[row]?.[col] || '';
-            const bonus = BONUS_MAP[`${row},${col}`];
-            const isCenter = row === 7 && col === 7;
-            const hasTile = letter !== '';
-            const previewLetter = preview.get(`${row},${col}`);
-            const isPreview = !!previewLetter;
-            const isSelected = selection && selection.row === row && selection.col === col;
-
-            let bg = '#c8b97a';
-            if (!hasTile && !isPreview && bonus) bg = BONUS_COLORS[bonus];
-            if (!hasTile && !isPreview && isCenter && !bonus) bg = '#ffaaaa';
-
-            // Preview tiles get a distinct look
-            if (isPreview) bg = '#ffe082';
-
-            return (
-              <div
-                key={col}
-                onClick={() => onSquareClick(row, col)}
-                style={{
-                  width: cellSize,
-                  height: cellSize,
-                  border: isSelected
-                    ? '2px solid #ffff00'
-                    : isPreview
-                    ? '2px solid #ffa000'
-                    : '1px solid #9a8a5a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: hasTile ? '#f5e6b8' : bg,
-                  fontSize: (hasTile || isPreview) ? 16 : 9,
-                  fontWeight: (hasTile || isPreview) ? 'bold' : 'normal',
-                  color: isPreview
-                    ? '#bf360c'
-                    : hasTile
-                    ? (letter === letter.toLowerCase() ? '#666' : '#222')
-                    : '#fff',
-                  fontFamily: "'Lexend', sans-serif",
-                  position: 'relative',
-                  boxShadow: isSelected
-                    ? '0 0 6px rgba(255,255,0,0.6)'
-                    : isPreview
-                    ? '0 0 4px rgba(255,160,0,0.5)'
-                    : hasTile ? 'inset 0 0 3px rgba(0,0,0,0.3)' : 'none',
-                  borderRadius: (hasTile || isPreview) ? 2 : 0,
-                  lineHeight: '1',
-                  cursor: 'pointer',
-                }}
-                title={`${String.fromCharCode(65 + col)}${row + 1}`}
-              >
-                {isSelected && !hasTile && !isPreview && (
-                  <span style={{
-                    position: 'absolute',
-                    bottom: 1,
-                    right: 2,
-                    fontSize: 8,
-                    color: '#ffff00',
-                    fontWeight: 'bold',
-                  }}>
-                    {selection.direction === 'across' ? '\u2192' : '\u2193'}
-                  </span>
-                )}
-                {isPreview
-                  ? <>
-                      {previewLetter}
-                      {previewLetter === previewLetter.toUpperCase() && TILE_VALUES[previewLetter.toUpperCase()] && (
-                        <span style={{ position:'absolute', bottom:1, right:2, fontSize:8, fontWeight:'bold', color:'#bf360c', opacity:0.7 }}>
-                          {TILE_VALUES[previewLetter.toUpperCase()]}
-                        </span>
-                      )}
-                    </>
-                  : hasTile
-                  ? <>
-                      {letter.toUpperCase()}
-                      {letter === letter.toUpperCase() && TILE_VALUES[letter] && (
-                        <span style={{ position:'absolute', bottom:1, right:2, fontSize:8, fontWeight:'bold', color:'#555' }}>
-                          {TILE_VALUES[letter]}
-                        </span>
-                      )}
-                    </>
-                  : (bonus ? BONUS_LABELS[bonus] : (isCenter ? '\u2605' : ''))}
-              </div>
-            );
-          })}
+    <div style={{ display: 'inline-block' }}>
+      <div style={{
+        display: 'inline-flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden',
+        boxShadow: v('--board-shadow'), lineHeight: 0, background: v('--board-bg'),
+      }}>
+        <div style={{ display: 'flex' }}>
+          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
+          {Array.from({ length: dim }, (_, col) => (
+            <div key={col} style={{
+              width: cellSize, textAlign: 'center', fontSize: Math.round(cellSize * 0.28),
+              color: v('--board-label'), fontWeight: 500, lineHeight: `${labelSize}px`,
+              background: v('--board-bg'),
+            }}>
+              {String.fromCharCode(65 + col)}
+            </div>
+          ))}
+          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
         </div>
-      ))}
+        <div style={{ display: 'flex' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', background: v('--board-bg') }}>
+            {Array.from({ length: dim }, (_, row) => (
+              <div key={row} style={{
+                width: labelSize, height: cellSize, display: 'flex',
+                alignItems: 'center', justifyContent: 'center', fontSize: Math.round(cellSize * 0.28),
+                color: v('--board-label'), fontWeight: 500,
+                marginTop: row > 0 ? 1 : 0,
+              }}>
+                {row + 1}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, background: v('--bg'), border: `1px solid ${v('--bg')}` }}>
+            {Array.from({ length: dim }, (_, row) => (
+              <div key={row} style={{ display: 'flex', gap: 1 }}>
+              {Array.from({ length: dim }, (_, col) => {
+              const letter = state?.board?.[row]?.[col] || '';
+              const bonus = BONUS_MAP[`${row},${col}`];
+              const isCenter = row === 7 && col === 7;
+              const hasTile = letter !== '';
+              const previewLetter = preview.get(`${row},${col}`);
+              const isPreview = !!previewLetter;
+              const isSelected = selection && selection.row === row && selection.col === col;
+              const isBlank = hasTile && letter === letter.toLowerCase();
+              const isPreviewBlank = isPreview && previewLetter === previewLetter!.toLowerCase();
+
+              let bg = v('--board-bg');
+              if (!hasTile && !isPreview && bonus) bg = bonusBg[bonus];
+              if (!hasTile && !isPreview && isCenter && !bonus) bg = v('--center');
+              if (isPreview) bg = v('--tile-preview-bg');
+
+              return (
+                <div
+                  key={col}
+                  onClick={() => onSquareClick(row, col)}
+                  style={{
+                    width: cellSize, height: cellSize,
+                    border: isSelected ? `2px solid ${v('--selection-border')}` : 'none',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: hasTile ? v('--tile-bg') : bg,
+                    fontSize: (hasTile || isPreview) ? Math.round(cellSize * 0.44) : Math.round(cellSize * 0.25),
+                    fontWeight: (hasTile || isPreview) ? 600 : 500,
+                    color: isPreview
+                      ? (isPreviewBlank ? v('--tile-preview-blank') : v('--tile-preview-text'))
+                      : hasTile
+                      ? (isBlank ? v('--cw-blank') : v('--cw'))
+                      : (bonus ? bonusText[bonus] : v('--text-muted')),
+                    fontFamily: "'Lexend', sans-serif",
+                    position: 'relative',
+                    boxShadow: isSelected
+                      ? `0 0 4px ${v('--selection-glow')}`
+                      : 'none',
+                    borderRadius: 0,
+                    lineHeight: '1', cursor: 'pointer',
+                    paddingBottom: 2,
+                  }}
+                  title={`${String.fromCharCode(65 + col)}${row + 1}`}
+                >
+                  {isSelected && !hasTile && !isPreview && (
+                    <span style={{
+                      position: 'absolute', bottom: Math.round(cellSize * 0.03), right: Math.round(cellSize * 0.06), fontSize: Math.round(cellSize * 0.22),
+                      color: v('--selection-arrow'), fontWeight: 'bold',
+                    }}>
+                      {selection.direction === 'across' ? '\u2192' : '\u2193'}
+                    </span>
+                  )}
+                  {isPreview
+                    ? <>
+                        {previewLetter}
+                        {!isPreviewBlank && TILE_VALUES[previewLetter!.toUpperCase()] && (
+                          <span style={{ position:'absolute', bottom: Math.round(cellSize * 0.08), right: Math.round(cellSize * 0.08), fontSize: Math.round(cellSize * 0.22), fontWeight:600, color: v('--tile-preview-text'), opacity:0.6 }}>
+                            {TILE_VALUES[previewLetter!.toUpperCase()]}
+                          </span>
+                        )}
+                      </>
+                    : hasTile
+                    ? <>
+                        {letter.toUpperCase()}
+                        {!isBlank && TILE_VALUES[letter] && (
+                          <span style={{ position:'absolute', bottom: Math.round(cellSize * 0.08), right: Math.round(cellSize * 0.08), fontSize: Math.round(cellSize * 0.22), fontWeight:600, color: v('--cw-subtle') }}>
+                            {TILE_VALUES[letter]}
+                          </span>
+                        )}
+                      </>
+                    : (bonus ? BONUS_LABELS[bonus] : (isCenter ? '\u2605' : ''))}
+                </div>
+              );
+              })}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', background: v('--board-bg') }}>
+            {Array.from({ length: dim }, (_, row) => (
+              <div key={row} style={{ width: labelSize, height: cellSize, marginTop: row > 0 ? 1 : 0 }} />
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex' }}>
+          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
+          <div style={{ flex: 1, height: labelSize, background: v('--board-bg') }} />
+          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
+        </div>
+      </div>
     </div>
   );
 }

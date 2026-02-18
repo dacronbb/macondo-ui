@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from './api/client';
 import type { GameState, MoveInfo, EventInfo } from './api/types';
 import { Board, toCoords, buildMoveString, formatPlayThrough } from './components/Board';
@@ -7,7 +7,7 @@ import { Rack } from './components/Rack';
 import { ScoreBar } from './components/ScoreBar';
 import { MoveList } from './components/MoveList';
 import { GameHistory } from './components/GameHistory';
-import { Controls } from './components/Controls';
+// Controls moved to action bar below the board
 import { Settings } from './components/Settings';
 import { ExchangeModal } from './components/ExchangeModal';
 import { TilePool } from './components/TilePool';
@@ -26,8 +26,34 @@ function App() {
   const [lexicons, setLexicons] = useState<string[]>(['CSW24', 'NWL23']);
   const [challengeRule, setChallengeRule] = useState('DOUBLE');
 
+  // Theme state
+  const [theme, setTheme] = useState(() => localStorage.getItem('macondo-theme') || 'light');
+  const [colorway, setColorway] = useState(() => localStorage.getItem('macondo-colorway') || 'green');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('macondo-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-colorway', colorway);
+    localStorage.setItem('macondo-colorway', colorway);
+  }, [colorway]);
+
   // Exchange modal state
   const [showExchange, setShowExchange] = useState(false);
+  // Options menu state
+  const [showOptions, setShowOptions] = useState(false);
+  const optionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showOptions) return;
+    const handler = (e: MouseEvent) => {
+      if (optionsRef.current && !optionsRef.current.contains(e.target as Node)) setShowOptions(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showOptions]);
 
   // Board interaction state
   const [selection, setSelection] = useState<BoardSelection | null>(null);
@@ -107,7 +133,9 @@ function App() {
       setSelection(null);
       setTileInput('');
       await refreshHistory();
-      setStatusMsg(`AI played: ${result.move} (+${result.score})`);
+      const parts = result.move.split(' ');
+      const aiCoords = parts[0], aiTiles = parts[1] || '';
+      setStatusMsg(`AI played: ${aiCoords} ${formatPlayThrough(aiTiles, aiCoords, result.state.board)} (+${result.score})`);
     }
   }, [withLoading, refreshHistory]);
 
@@ -153,6 +181,34 @@ function App() {
       setStatusMsg(`Jumped to turn ${turn}`);
     }
   }, [withLoading]);
+
+  // Challenge the last play
+  const handleChallenge = useCallback(async () => {
+    const s = await withLoading(() => api.challenge());
+    if (s) {
+      setState(s);
+      setMoves([]);
+      await refreshHistory();
+      setStatusMsg(s.phonyChallenged ? 'Challenge successful! Move removed.' : 'Challenge failed.');
+    }
+  }, [withLoading, refreshHistory]);
+
+  // Shuffle rack tiles randomly
+  const handleShuffle = useCallback(() => {
+    if (!state) return;
+    const letters = state.rack.split('');
+    for (let i = letters.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [letters[i], letters[j]] = [letters[j], letters[i]];
+    }
+    setState(prev => prev ? { ...prev, rack: letters.join('') } : prev);
+  }, [state]);
+
+  // Recall tiles from board (clear selection and typed tiles)
+  const handleRecall = useCallback(() => {
+    setSelection(null);
+    setTileInput('');
+  }, []);
 
   // Board square click: set selection or toggle direction
   const handleSquareClick = useCallback((row: number, col: number) => {
@@ -310,86 +366,150 @@ function App() {
         setState(result.state);
         setMoves([]);
         await refreshHistory();
-        setStatusMsg(`maCATdo played: ${result.move} (+${result.score})`);
+        const mp = result.move.split(' ');
+        const mCoords = mp[0], mTiles = mp[1] || '';
+        setStatusMsg(`maCATdo played: ${mCoords} ${formatPlayThrough(mTiles, mCoords, result.state.board)} (+${result.score})`);
       }
     }, 500); // small delay so the human can see the board before bot plays
     return () => clearTimeout(timer);
   }, [state, loading, withLoading, refreshHistory]);
 
   const isPlaying = state?.playState === 'PLAYING';
+  const lastEvent = history.length > 0 ? history[history.length - 1] : null;
+  const canChallenge = isPlaying && !!lastEvent?.position && state?.challengeRule !== 'VOID';
+
+  // Dynamic board sizing: maximize board to fit viewport height
+  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const cellSize = useMemo(() => {
+    const dim = 15;
+    // Vertical budget: 32px padding top + board + rack(~54) + action bar(~48) + 32px padding bottom
+    const overhead = 32 + 54 + 48 + 32;
+    const availableHeight = viewportHeight - overhead;
+    // Board height = dim * cellSize + 2 * labelSize, where labelSize = cellSize * 0.5
+    // So: availableHeight = dim * cellSize + cellSize => cellSize = availableHeight / (dim + 1)
+    const computed = Math.floor(availableHeight / (dim + 1));
+    return Math.max(24, Math.min(computed, 48)); // clamp between 24-48px
+  }, [viewportHeight]);
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>Macondo</h1>
-        <Settings
-          currentRule={state?.challengeRule || challengeRule}
-          currentLexicon={lexicon}
-          lexicons={lexicons}
-          onChangeRule={handleChangeRule}
-          onChangeLexicon={setLexicon}
-          loading={loading}
-        />
-        {statusMsg && <span className="status-msg">{statusMsg}</span>}
-        {error && <span className="error-msg" onClick={clearError}>{error}</span>}
-      </header>
-
-      <Controls
-        onNewGame={handleNewGame}
-        onGenerate={handleGenerate}
-        onPass={handlePass}
-        onExchange={() => setShowExchange(true)}
-        onFirst={() => handleNavigate('first')}
-        onPrev={() => handleNavigate('prev')}
-        onNext={() => handleNavigate('next')}
-        onLast={() => handleNavigate('last')}
-        isPlaying={isPlaying}
-        loading={loading}
-      />
-
-      <ScoreBar state={state} />
-
       <div className="main-layout">
         <div className="board-area">
-          <Board state={state} selection={selection} tileInput={tileInput} onSquareClick={handleSquareClick} />
-          {state && <Rack rack={state.rack} />}
+          <Board state={state} selection={selection} tileInput={tileInput} cellSize={cellSize} onSquareClick={handleSquareClick} />
+          {state && <Rack rack={state.rack} cellSize={cellSize} onShuffle={handleShuffle} onRecall={handleRecall} />}
 
-          {/* Move input bar */}
-          {selection && (
-            <div className="move-input-bar">
-              <span className="move-coords">
-                {toCoords(selection)} {selection.direction === 'across' ? '\u2192' : '\u2193'}
-              </span>
-              <input
-                ref={inputRef}
-                type="text"
-                value={tileInput}
-                onChange={e => handleTileInputChange(e.target.value)}
-                onKeyDown={handleInputKeyDown}
-                placeholder="Type tiles then Enter (use . for blank)"
-                className="move-tile-input"
-                autoFocus
-              />
-              <button
-                onClick={handleSubmitTiledMove}
-                disabled={!tileInput.trim() || loading}
-                className="move-submit-btn"
-              >
-                Play
-              </button>
-              <button
-                onClick={() => { setSelection(null); setTileInput(''); }}
-                className="move-cancel-btn"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
+          {/* Action bar */}
+          <div className="action-bar" ref={optionsRef}>
+            {!state ? (
+              <div className="action-bar-inner">
+                <button className="action-btn action-btn-primary" onClick={handleNewGame} disabled={loading}>
+                  Start Game
+                </button>
+              </div>
+            ) : (
+              <div className="action-bar-inner">
+                <button className="action-btn" onClick={() => setShowOptions(!showOptions)} disabled={loading}>
+                  Options
+                </button>
+                <button className="action-btn" onClick={handlePass} disabled={loading || !isPlaying}>
+                  Pass
+                </button>
+                {state.challengeRule !== 'VOID' && (
+                  <button className="action-btn" onClick={handleChallenge} disabled={loading || !canChallenge}>
+                    Challenge
+                  </button>
+                )}
+                <button className="action-btn" onClick={() => setShowExchange(true)} disabled={loading || !isPlaying}>
+                  Exchange
+                </button>
+                <button
+                  className="action-btn action-btn-primary"
+                  onClick={handleSubmitTiledMove}
+                  disabled={!tileInput.trim() || loading}
+                >
+                  Play
+                </button>
+              </div>
+            )}
+            {showOptions && (
+              <div className="options-dropdown">
+                <button className="option-item" onClick={() => { handleNewGame(); setShowOptions(false); }} disabled={loading}>
+                  New Game
+                </button>
+                <button className="option-item" onClick={() => { handleAIPlay(); setShowOptions(false); }} disabled={loading || !isPlaying}>
+                  AI Play
+                </button>
+                <div className="option-divider" />
+                <button className="option-item" onClick={() => { handleNavigate('first'); setShowOptions(false); }} disabled={loading}>
+                  |&lt; First
+                </button>
+                <button className="option-item" onClick={() => { handleNavigate('prev'); setShowOptions(false); }} disabled={loading}>
+                  &lt; Previous
+                </button>
+                <button className="option-item" onClick={() => { handleNavigate('next'); setShowOptions(false); }} disabled={loading}>
+                  Next &gt;
+                </button>
+                <button className="option-item" onClick={() => { handleNavigate('last'); setShowOptions(false); }} disabled={loading}>
+                  Last &gt;|
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Hidden input for keyboard tile entry */}
+          <input
+            ref={inputRef}
+            type="text"
+            value={tileInput}
+            onChange={e => handleTileInputChange(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
+            tabIndex={-1}
+          />
         </div>
 
         <div className="side-panel">
+          <header className="app-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>
+              {error && <span className="error-msg" onClick={clearError}>{error}</span>}
+            </div>
+            <Settings
+              currentRule={state?.challengeRule || challengeRule}
+              currentLexicon={lexicon}
+              lexicons={lexicons}
+              theme={theme}
+              colorway={colorway}
+              onChangeRule={handleChangeRule}
+              onChangeLexicon={setLexicon}
+              onChangeTheme={setTheme}
+              onChangeColorway={setColorway}
+              loading={loading}
+            />
+          </header>
+
           <div className="panel-section">
-            <h3>Generated Moves</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)' }}>
+              <h3 style={{ borderBottom: 'none' }}>Generated Moves</h3>
+              <button
+                onClick={handleGenerate}
+                disabled={loading || !isPlaying}
+                style={{
+                  background: 'none', border: 'none', color: 'var(--cw)',
+                  fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
+                  cursor: loading || !isPlaying ? 'not-allowed' : 'pointer',
+                  padding: '8px 12px', opacity: loading || !isPlaying ? 0.5 : 1,
+                }}
+              >
+                Generate
+              </button>
+            </div>
             <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} />
           </div>
 
@@ -397,6 +517,7 @@ function App() {
 
           <div className="panel-section">
             <h3>Game History</h3>
+            <ScoreBar state={state} statusMsg={statusMsg} />
             <GameHistory
               events={history}
               playerNames={state?.playerNames || ['Player 1', 'Player 2']}
