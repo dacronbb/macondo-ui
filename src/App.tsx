@@ -9,7 +9,6 @@ import { Scoresheet } from './components/Scoresheet';
 // Controls moved to action bar below the board
 import { Settings } from './components/Settings';
 import { ExchangeModal } from './components/ExchangeModal';
-import { TilePool } from './components/TilePool';
 import './App.css';
 
 function App() {
@@ -415,11 +414,33 @@ function App() {
     return Math.max(24, Math.min(computed, 48)); // clamp between 24-48px
   }, [viewportHeight]);
 
+  // Measure board and bottom (rack+action) heights for side panel alignment
+  const boardRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const [boardHeight, setBoardHeight] = useState(0);
+  const [bottomHeight, setBottomHeight] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      if (boardRef.current) setBoardHeight(boardRef.current.offsetHeight);
+      if (bottomRef.current) setBottomHeight(bottomRef.current.offsetHeight);
+    };
+    measure();
+    const obs = new ResizeObserver(measure);
+    if (boardRef.current) obs.observe(boardRef.current);
+    if (bottomRef.current) obs.observe(bottomRef.current);
+    return () => obs.disconnect();
+  }, [cellSize, state]);
+
+
   return (
     <div className="app">
       <div className="main-layout">
         <div className="board-area">
-          <Board state={state} selection={selection} tileInput={tileInput} cellSize={cellSize} onSquareClick={handleSquareClick} />
+          <div ref={boardRef}>
+            <Board state={state} selection={selection} tileInput={tileInput} cellSize={cellSize} onSquareClick={handleSquareClick} />
+          </div>
+          <div ref={bottomRef}>
           {state && <Rack rack={state.rack} cellSize={cellSize} onShuffle={handleShuffle} onRecall={handleRecall} />}
 
           {/* Action bar */}
@@ -479,6 +500,7 @@ function App() {
               </div>
             )}
           </div>
+          </div>{/* end bottomRef */}
 
           {/* Hidden input for keyboard tile entry */}
           <input
@@ -493,27 +515,37 @@ function App() {
         </div>
 
         <div className="side-panel">
-          <header className="app-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>
-              {error && <span className="error-msg" onClick={clearError}>{error}</span>}
-            </div>
-            <Settings
-              currentRule={state?.challengeRule || challengeRule}
-              currentLexicon={lexicon}
-              lexicons={lexicons}
-              theme={theme}
-              colorway={colorway}
-              onChangeRule={handleChangeRule}
-              onChangeLexicon={setLexicon}
-              onChangeTheme={setTheme}
-              onChangeColorway={setColorway}
-              loading={loading}
+          {/* Top zone: sCraBBle header + scoresheet — same height as board */}
+          <div style={{ height: boardHeight || undefined, display: 'flex', flexDirection: 'column', minHeight: 0, flexShrink: 0 }}>
+            <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>
+                {error && <span className="error-msg" onClick={clearError}>{error}</span>}
+              </div>
+              <Settings
+                currentRule={state?.challengeRule || challengeRule}
+                currentLexicon={lexicon}
+                lexicons={lexicons}
+                theme={theme}
+                colorway={colorway}
+                onChangeRule={handleChangeRule}
+                onChangeLexicon={setLexicon}
+                onChangeTheme={setTheme}
+                onChangeColorway={setColorway}
+                loading={loading}
+              />
+            </header>
+            <Scoresheet
+              events={history}
+              state={state}
+              statusMsg={statusMsg}
+              onNavigate={handleNavigateToTurn}
             />
-          </header>
+          </div>
 
-          <div className="panel-section">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)' }}>
+          {/* Bottom zone: generated moves — aligned with rack + action bar */}
+          <div className="panel-section" style={{ marginTop: 16, height: bottomHeight ? bottomHeight - 16 : undefined, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ borderBottom: 'none' }}>Generated moves</h3>
               <button
                 onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
@@ -528,17 +560,12 @@ function App() {
                 {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
               </button>
             </div>
-            {showMoves && <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} onAddMove={handleAddMove} />}
+            {showMoves && (
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+                <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} onAddMove={handleAddMove} />
+              </div>
+            )}
           </div>
-
-          <TilePool state={state} />
-
-          <Scoresheet
-            events={history}
-            state={state}
-            statusMsg={statusMsg}
-            onNavigate={handleNavigateToTurn}
-          />
         </div>
       </div>
 

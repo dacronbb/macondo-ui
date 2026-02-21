@@ -41,7 +41,7 @@ export function TilePool({ state }: TilePoolProps) {
   return (
     <div style={{
       background: 'var(--bg-raised)', borderRadius: 12, overflow: 'hidden',
-      boxShadow: 'var(--shadow-neu)',
+      boxShadow: 'var(--shadow-neu)', flexShrink: 0,
     }}>
       <h3 style={{
         margin: 0, padding: '8px 12px', fontSize: 13,

@@ -51,7 +51,6 @@
   min-width: 280px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
 .panel-section {

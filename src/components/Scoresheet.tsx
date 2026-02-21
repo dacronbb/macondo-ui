@@ -1,3 +1,4 @@
+import { useRef, useState, useEffect } from 'react';
 import type { EventInfo, GameState } from '../api/types';
 
 interface ScoresheetProps {
@@ -160,6 +161,30 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
   return cells;
 }
 
+const FULL_DISTRIBUTION: Record<string, number> = {
+  A:9,B:2,C:2,D:4,E:12,F:2,G:3,H:2,I:9,J:1,K:1,L:4,M:2,N:6,O:8,P:2,Q:1,
+  R:6,S:4,T:6,U:4,V:2,W:2,X:1,Y:2,Z:1,'?':2,
+};
+const VOWELS = new Set(['A','E','I','O','U']);
+const LETTER_ORDER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ?'.split('');
+
+function computeRemaining(board: string[][]) {
+  const used: Record<string, number> = {};
+  for (const row of board) {
+    for (const cell of row) {
+      if (cell) {
+        const key = cell === cell.toLowerCase() ? '?' : cell;
+        used[key] = (used[key] || 0) + 1;
+      }
+    }
+  }
+  const remaining: Record<string, number> = {};
+  for (const letter of LETTER_ORDER) {
+    remaining[letter] = Math.max(0, (FULL_DISTRIBUTION[letter] || 0) - (used[letter] || 0));
+  }
+  return remaining;
+}
+
 export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetProps) {
   const playerNames = state?.playerNames || ['Player 1', 'Player 2'];
   const onTurn = state?.onTurn ?? -1;
@@ -172,10 +197,35 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
   const p1Cells = allCells.filter(c => c.playerIndex === 1);
   const roundCount = Math.max(p0Cells.length, p1Cells.length);
 
+  // Measure container width for proportional row heights
+  const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Auto-scroll to bottom when new events arrive
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [events.length]);
+
+  const rowHeight = containerWidth > 0 ? containerWidth / 4 : 80;
+
   return (
-    <div className="panel-section" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+    <div ref={containerRef} className="panel-section" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
       {/* Header row */}
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {[0, 1].map(pi => (
           <div key={pi} style={{
             flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -200,9 +250,9 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
       </div>
 
       {/* Move rows */}
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {roundCount === 0 ? (
-          <div style={{ padding: 12, color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13, textAlign: 'center' }}>
+          <div style={{ padding: 12, color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 14, textAlign: 'center' }}>
             No moves yet
           </div>
         ) : (
@@ -210,32 +260,32 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
             const left = p0Cells[ri];
             const right = p1Cells[ri];
             return (
-              <div key={ri} style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+              <div key={ri} style={{ display: 'flex', borderBottom: '1px solid var(--border)', height: rowHeight }}>
                 {[left, right].map((cell, ci) => (
                   <div
                     key={ci}
                     onClick={cell ? () => onNavigate(cell.turn + 1) : undefined}
                     style={{
-                      flex: 1, padding: '6px 10px', cursor: cell ? 'pointer' : 'default',
+                      flex: 1, padding: '8px 12px', cursor: cell ? 'pointer' : 'default',
                       borderRight: ci === 0 ? '1px solid var(--border)' : undefined,
-                      minHeight: 36,
+                      display: 'flex', flexDirection: 'column', justifyContent: 'center',
                     }}
                   >
                     {cell && (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>
+                          <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 500 }}>
                             {cell.description}
                           </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4, whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4, whiteSpace: 'nowrap' }}>
                             {cell.scoreText}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 1 }}>
-                          <span style={{ fontSize: 11, color: 'var(--text-subtle)', letterSpacing: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 2 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-subtle)', letterSpacing: 1 }}>
                             {cell.rack || ''}
                           </span>
-                          <span style={{ fontSize: 13, color: 'var(--cw)', fontWeight: 700 }}>
+                          <span style={{ fontSize: 15, color: 'var(--cw)', fontWeight: 700 }}>
                             {cell.cumulative}
                           </span>
                         </div>
@@ -248,6 +298,51 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
           })
         )}
       </div>
+
+      {/* Unseen tiles — pinned at bottom */}
+      {state && (
+        <div style={{ flexShrink: 0, borderTop: '1px solid var(--border)', padding: '8px 12px' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 4, letterSpacing: 0.5 }}>
+            {state.bagCount} unseen tiles
+          </div>
+          <div style={{
+            fontSize: 13, fontWeight: 600, color: 'var(--text)',
+            lineHeight: '22px', display: 'flex', flexWrap: 'wrap', gap: '0 8px',
+          }}>
+            {(() => {
+              const remaining = computeRemaining(state.board);
+              let vowelCount = 0, consonantCount = 0;
+              for (const letter of LETTER_ORDER) {
+                if (letter === '?') continue;
+                if (VOWELS.has(letter)) vowelCount += remaining[letter];
+                else consonantCount += remaining[letter];
+              }
+              return (
+                <>
+                  {LETTER_ORDER.map(letter => {
+                    const count = remaining[letter];
+                    if (count === 0) return null;
+                    return (
+                      <span key={letter} style={{
+                        whiteSpace: 'nowrap',
+                        color: letter === '?' ? 'var(--text-subtle)' : undefined,
+                      }}>
+                        {(letter === '?' ? '?' : letter).repeat(count)}
+                      </span>
+                    );
+                  })}
+                  <div style={{
+                    borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6,
+                    fontSize: 11, color: 'var(--text-muted)', width: '100%',
+                  }}>
+                    {consonantCount} consonants, {vowelCount} vowels
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
