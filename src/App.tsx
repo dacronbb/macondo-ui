@@ -4,9 +4,8 @@ import type { GameState, MoveInfo, EventInfo } from './api/types';
 import { Board, toCoords, buildMoveString, formatPlayThrough } from './components/Board';
 import type { BoardSelection } from './components/Board';
 import { Rack } from './components/Rack';
-import { ScoreBar } from './components/ScoreBar';
 import { MoveList } from './components/MoveList';
-import { GameHistory } from './components/GameHistory';
+import { Scoresheet } from './components/Scoresheet';
 // Controls moved to action bar below the board
 import { Settings } from './components/Settings';
 import { ExchangeModal } from './components/ExchangeModal';
@@ -42,6 +41,8 @@ function App() {
 
   // Exchange modal state
   const [showExchange, setShowExchange] = useState(false);
+  // Move list visibility
+  const [showMoves, setShowMoves] = useState(true);
   // Options menu state
   const [showOptions, setShowOptions] = useState(false);
   const optionsRef = useRef<HTMLDivElement>(null);
@@ -105,9 +106,26 @@ function App() {
     const m = await withLoading(() => api.generate(15));
     if (m) {
       setMoves(m);
+      setShowMoves(true);
       setStatusMsg(`Generated ${m.length} moves`);
     }
   }, [withLoading]);
+
+  const handleAddMove = useCallback((index: number) => {
+    const move = moves.find(m => m.index === index);
+    if (!move || move.action !== 'play' || !move.coords || !move.tiles) return;
+    // Parse coords into selection
+    const acrossMatch = move.coords.match(/^(\d+)([A-O])$/);
+    const downMatch = move.coords.match(/^([A-O])(\d+)$/);
+    if (acrossMatch) {
+      setSelection({ row: parseInt(acrossMatch[1]) - 1, col: acrossMatch[2].charCodeAt(0) - 65, direction: 'across' });
+    } else if (downMatch) {
+      setSelection({ row: parseInt(downMatch[2]) - 1, col: downMatch[1].charCodeAt(0) - 65, direction: 'down' });
+    } else return;
+    // Strip play-through markers (dots) — the board preview skips occupied squares automatically
+    setTileInput(move.tiles.replace(/\./g, ''));
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [moves]);
 
   const handlePlayMove = useCallback(async (index: number) => {
     const s = await withLoading(() => api.playMoveFromList(index));
@@ -496,34 +514,31 @@ function App() {
 
           <div className="panel-section">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)' }}>
-              <h3 style={{ borderBottom: 'none' }}>Generated Moves</h3>
+              <h3 style={{ borderBottom: 'none' }}>Generated moves</h3>
               <button
-                onClick={handleGenerate}
-                disabled={loading || !isPlaying}
+                onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
+                disabled={moves.length === 0 && (loading || !isPlaying)}
                 style={{
                   background: 'none', border: 'none', color: 'var(--cw)',
                   fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
-                  cursor: loading || !isPlaying ? 'not-allowed' : 'pointer',
-                  padding: '8px 12px', opacity: loading || !isPlaying ? 0.5 : 1,
+                  cursor: (moves.length === 0 && (loading || !isPlaying)) ? 'not-allowed' : 'pointer',
+                  padding: '8px 12px', opacity: (moves.length === 0 && (loading || !isPlaying)) ? 0.5 : 1,
                 }}
               >
-                Generate
+                {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
               </button>
             </div>
-            <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} />
+            {showMoves && <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} onAddMove={handleAddMove} />}
           </div>
 
           <TilePool state={state} />
 
-          <div className="panel-section">
-            <h3>Game History</h3>
-            <ScoreBar state={state} statusMsg={statusMsg} />
-            <GameHistory
-              events={history}
-              playerNames={state?.playerNames || ['Player 1', 'Player 2']}
-              onNavigate={handleNavigateToTurn}
-            />
-          </div>
+          <Scoresheet
+            events={history}
+            state={state}
+            statusMsg={statusMsg}
+            onNavigate={handleNavigateToTurn}
+          />
         </div>
       </div>
 

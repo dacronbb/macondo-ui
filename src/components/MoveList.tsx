@@ -26,9 +26,10 @@ interface MoveListProps {
   moves: MoveInfo[];
   board?: string[][];
   onPlayMove: (index: number) => void;
+  onAddMove?: (index: number) => void;
 }
 
-export function MoveList({ moves, board, onPlayMove }: MoveListProps) {
+export function MoveList({ moves, board, onPlayMove, onAddMove }: MoveListProps) {
   if (moves.length === 0) {
     return (
       <div style={{ padding: 12, color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 }}>
@@ -61,7 +62,17 @@ export function MoveList({ moves, board, onPlayMove }: MoveListProps) {
               <td style={{ padding: '4px 6px', textAlign: 'right', color: 'var(--text)' }}>{m.score}</td>
               <td style={{ padding: '4px 6px', textAlign: 'right', color: 'var(--text-secondary)' }}>{m.equity.toFixed(1)}</td>
               <td style={{ padding: '4px 6px', color: 'var(--text-muted)' }}>{m.leave}</td>
-              <td style={{ padding: '4px 6px' }}>
+              <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                {onAddMove && m.action === 'play' && (
+                  <button onClick={() => onAddMove(m.index)} style={{
+                    background: 'var(--bg-raised)', color: 'var(--text-secondary)',
+                    border: 'none', borderRadius: 6, padding: '2px 10px',
+                    cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                    boxShadow: 'var(--shadow-neu-sm)', marginRight: 4,
+                  }}>
+                    Add
+                  </button>
+                )}
                 <button onClick={() => onPlayMove(m.index)} style={{
                   background: 'var(--bg-raised)', color: 'var(--cw)',
                   border: 'none', borderRadius: 6, padding: '2px 10px',

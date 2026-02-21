@@ -47,9 +47,9 @@ export function TilePool({ state }: TilePoolProps) {
         margin: 0, padding: '8px 12px', fontSize: 13,
         color: 'var(--text-secondary)', background: 'transparent',
         borderBottom: '1px solid var(--border)',
-        textTransform: 'uppercase', letterSpacing: 0.5,
+        letterSpacing: 0.5,
       }}>
-        {state.bagCount} Unseen Tiles
+        {state.bagCount} unseen tiles
       </h3>
       <div style={{
         padding: '8px 12px', fontFamily: "'Lexend', sans-serif",
