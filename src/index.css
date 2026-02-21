@@ -58,10 +58,6 @@
   --player1: #1565c0;
   --player2: #c75b39;
 
-  --selection-border: #1565c0;
-  --selection-glow: rgba(21, 101, 192, 0.4);
-  --selection-arrow: #1565c0;
-
   --modal-overlay: rgba(0, 0, 0, 0.3);
   --modal-bg: #f0f0f0;
 
@@ -118,10 +114,6 @@
 
   --player1: #64b5f6;
   --player2: #ffab91;
-
-  --selection-border: #64b5f6;
-  --selection-glow: rgba(100, 181, 246, 0.4);
-  --selection-arrow: #64b5f6;
 
   --modal-overlay: rgba(0, 0, 0, 0.6);
   --modal-bg: #1a1a1a;

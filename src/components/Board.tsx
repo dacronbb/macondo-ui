@@ -130,6 +130,26 @@ function buildPreview(
   return preview;
 }
 
+/** Find the next empty square where the cursor should appear */
+function getCursorPos(
+  board: string[][] | undefined,
+  selection: BoardSelection | null,
+  tileInput: string,
+): { row: number; col: number } | null {
+  if (!selection || !board) return null;
+  const dim = board.length;
+  let r = selection.row, c = selection.col, ti = 0;
+  while (r < dim && c < dim) {
+    const existing = board[r]?.[c] || '';
+    if (!existing) {
+      if (ti >= tileInput.length) return { row: r, col: c };
+      ti++;
+    }
+    if (selection.direction === 'across') c++; else r++;
+  }
+  return null;
+}
+
 // Helper to read a CSS variable value
 function v(name: string): string {
   return `var(${name})`;
@@ -139,6 +159,7 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
   const dim = state?.board?.length || 15;
   const labelSize = Math.round(cellSize * 0.5);
   const preview = buildPreview(state?.board, selection, tileInput);
+  const cursorPos = getCursorPos(state?.board, selection, tileInput);
 
   const bonusBg: Record<string, string> = {
     tw: v('--tw'), dw: v('--dw'), tl: v('--tl'), dl: v('--dl'),
@@ -189,7 +210,7 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
               const hasTile = letter !== '';
               const previewLetter = preview.get(`${row},${col}`);
               const isPreview = !!previewLetter;
-              const isSelected = selection && selection.row === row && selection.col === col;
+              const isSelected = cursorPos && cursorPos.row === row && cursorPos.col === col;
               const isBlank = hasTile && letter === letter.toLowerCase();
               const isPreviewBlank = isPreview && previewLetter === previewLetter!.toLowerCase();
 
@@ -198,13 +219,15 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
               if (!hasTile && !isPreview && isCenter && !bonus) bg = v('--center');
               if (isPreview) bg = v('--tile-preview-bg');
 
+              const selColor = isSelected && bonus ? bonusText[bonus] : v('--cw');
+
               return (
                 <div
                   key={col}
                   onClick={() => onSquareClick(row, col)}
                   style={{
                     width: cellSize, height: cellSize,
-                    border: isSelected ? `2px solid ${v('--selection-border')}` : 'none',
+                    border: isSelected ? `2px solid ${selColor}` : 'none',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     background: hasTile ? v('--tile-bg') : bg,
                     fontSize: (hasTile || isPreview) ? Math.round(cellSize * 0.44) : Math.round(cellSize * 0.25),
@@ -217,7 +240,7 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
                     fontFamily: "'Lexend', sans-serif",
                     position: 'relative',
                     boxShadow: isSelected
-                      ? `0 0 4px ${v('--selection-glow')}`
+                      ? `0 0 4px ${selColor}`
                       : 'none',
                     borderRadius: 0,
                     lineHeight: '1', cursor: 'pointer',
@@ -225,14 +248,22 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
                   }}
                   title={`${String.fromCharCode(65 + col)}${row + 1}`}
                 >
-                  {isSelected && !hasTile && !isPreview && (
-                    <span style={{
-                      position: 'absolute', bottom: Math.round(cellSize * 0.03), right: Math.round(cellSize * 0.06), fontSize: Math.round(cellSize * 0.22),
-                      color: v('--selection-arrow'), fontWeight: 'bold',
-                    }}>
-                      {selection.direction === 'across' ? '\u2192' : '\u2193'}
-                    </span>
-                  )}
+                  {isSelected && !hasTile && !isPreview && selection && (() => {
+                    const hasLabel = !!(bonus || isCenter);
+                    return (
+                      <span style={{
+                        position: 'absolute',
+                        fontSize: Math.round(cellSize * (hasLabel ? 0.28 : 0.45)),
+                        color: selColor, fontWeight: 'bold',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        ...(hasLabel
+                          ? { left: 0, right: 0, top: '62%', bottom: 0 }
+                          : { inset: 0 }),
+                      }}>
+                        {selection.direction === 'across' ? '\u2192' : '\u2193'}
+                      </span>
+                    );
+                  })()}
                   {isPreview
                     ? <>
                         {previewLetter}

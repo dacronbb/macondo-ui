@@ -300,49 +300,61 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
       </div>
 
       {/* Unseen tiles — pinned at bottom */}
-      {state && (
-        <div style={{ flexShrink: 0, borderTop: '1px solid var(--border)', padding: '8px 12px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600, marginBottom: 4, letterSpacing: 0.5 }}>
-            {state.bagCount} unseen tiles
-          </div>
-          <div style={{
-            fontSize: 13, fontWeight: 600, color: 'var(--text)',
-            lineHeight: '22px', display: 'flex', flexWrap: 'wrap', gap: '0 8px',
-          }}>
-            {(() => {
-              const remaining = computeRemaining(state.board);
-              let vowelCount = 0, consonantCount = 0;
-              for (const letter of LETTER_ORDER) {
-                if (letter === '?') continue;
-                if (VOWELS.has(letter)) vowelCount += remaining[letter];
-                else consonantCount += remaining[letter];
-              }
-              return (
-                <>
-                  {LETTER_ORDER.map(letter => {
-                    const count = remaining[letter];
-                    if (count === 0) return null;
-                    return (
-                      <span key={letter} style={{
-                        whiteSpace: 'nowrap',
-                        color: letter === '?' ? 'var(--text-subtle)' : undefined,
-                      }}>
-                        {(letter === '?' ? '?' : letter).repeat(count)}
-                      </span>
-                    );
-                  })}
-                  <div style={{
-                    borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6,
-                    fontSize: 11, color: 'var(--text-muted)', width: '100%',
+      {state && (() => {
+        const remaining = computeRemaining(state.board);
+        let vowelCount = 0, consonantCount = 0;
+        for (const letter of LETTER_ORDER) {
+          if (letter === '?') continue;
+          if (VOWELS.has(letter)) vowelCount += remaining[letter];
+          else consonantCount += remaining[letter];
+        }
+        return (
+          <div style={{ flexShrink: 0, borderTop: '1px solid var(--border)', padding: '8px 12px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 6,
+            }}>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                {state.bagCount} tiles unseen
+              </span>
+              <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden' }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 12px',
+                  background: 'var(--dl)', color: 'var(--dl-text)',
+                  textAlign: 'center',
+                  minWidth: `${String(consonantCount).length + 13}ch`,
+                }}>
+                  {vowelCount} vowels
+                </span>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, padding: '2px 12px',
+                  background: 'var(--tl)', color: 'var(--tl-text)',
+                  textAlign: 'center',
+                }}>
+                  {consonantCount} consonants
+                </span>
+              </div>
+            </div>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: 'var(--text)',
+              lineHeight: '22px', display: 'flex', flexWrap: 'wrap', gap: '0 8px',
+            }}>
+              {LETTER_ORDER.map(letter => {
+                const count = remaining[letter];
+                if (count === 0) return null;
+                return (
+                  <span key={letter} style={{
+                    whiteSpace: 'nowrap',
+                    color: undefined,
                   }}>
-                    {consonantCount} consonants, {vowelCount} vowels
-                  </div>
-                </>
-              );
-            })()}
+                    {(letter === '?' ? '?' : letter).repeat(count)}
+                  </span>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
