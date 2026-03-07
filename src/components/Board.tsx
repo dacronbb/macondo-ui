@@ -1,4 +1,23 @@
-import type { GameState } from '../api/types';
+import type { GameState, PlacedTile } from '../api/types';
+import { parsePosition } from '../utils/notation';
+
+/** Returns the set of cell keys ("row,col") that were newly placed in the last move */
+function getLastMoveCells(lastMove: string | undefined): Set<string> {
+  const cells = new Set<string>();
+  if (!lastMove) return cells;
+  const parts = lastMove.split(' ');
+  if (parts.length < 2) return cells;
+  const [position, tiles] = parts; // ignore trailing "(score)" if present
+  const parsed = parsePosition(position);
+  if (!parsed) return cells;
+  let { row, col } = parsed;
+  const { isAcross } = parsed;
+  for (const ch of tiles) {
+    if (ch !== '.') cells.add(`${row},${col}`);
+    if (isAcross) col++; else row++;
+  }
+  return cells;
+}
 
 const BONUS_MAP: Record<string, string> = {};
 const TW = [[0,0],[0,7],[0,14],[7,0],[7,14],[14,0],[14,7],[14,14]];
@@ -33,9 +52,11 @@ export interface BoardSelection {
 interface BoardProps {
   state: GameState | null;
   selection: BoardSelection | null;
-  tileInput: string;
+  placedTiles: PlacedTile[];
   cellSize?: number;
+  previewScore?: number | null;
   onSquareClick: (row: number, col: number) => void;
+  onBoardPointerDown?: (row: number, col: number, e: React.PointerEvent) => void;
 }
 
 export function toCoords(sel: BoardSelection): string {
@@ -69,81 +90,148 @@ export function formatPlayThrough(tiles: string, coords: string, board?: string[
   return result;
 }
 
-export function buildMoveString(
+/** Auto-detect direction from placed tiles */
+function detectDirection(placedTiles: PlacedTile[], board: string[][]): 'across' | 'down' {
+  if (placedTiles.length <= 1) {
+    // Single tile: check board adjacency
+    if (placedTiles.length === 1) {
+      const { row, col } = placedTiles[0];
+      const hasLeft = col > 0 && board[row]?.[col - 1] !== '';
+      const hasRight = col < 14 && board[row]?.[col + 1] !== '';
+      const hasAbove = row > 0 && board[row - 1]?.[col] !== '';
+      const hasBelow = row < 14 && board[row + 1]?.[col] !== '';
+      if ((hasAbove || hasBelow) && !hasLeft && !hasRight) return 'down';
+    }
+    return 'across';
+  }
+  // Multiple tiles: same row = across, same col = down
+  const allSameRow = placedTiles.every(t => t.row === placedTiles[0].row);
+  if (allSameRow) return 'across';
+  return 'down';
+}
+
+export function buildMoveStringFromPlaced(
   board: string[][],
-  selection: BoardSelection,
-  tileInput: string,
+  placedTiles: PlacedTile[],
 ): { coords: string; tiles: string } | null {
-  if (!tileInput) return null;
+  if (placedTiles.length === 0) return null;
   const dim = board.length;
-  const isAcross = selection.direction === 'across';
+
+  const direction = detectDirection(placedTiles, board);
+  const isAcross = direction === 'across';
+
+  // Build a map of placed tiles
+  const placedMap = new Map<string, string>();
+  for (const t of placedTiles) {
+    placedMap.set(`${t.row},${t.col}`, t.letter);
+  }
+
+  // Sort placed tiles by position
+  const sorted = [...placedTiles].sort((a, b) =>
+    isAcross ? a.col - b.col : a.row - b.row
+  );
+
+  // Find the start of the word by walking backward from the leftmost/topmost placed tile
+  let startRow = sorted[0].row;
+  let startCol = sorted[0].col;
   const getCell = (r: number, c: number): string => board[r]?.[c] || '';
 
-  let startRow = selection.row;
-  let startCol = selection.col;
   if (isAcross) {
     while (startCol > 0 && getCell(startRow, startCol - 1) !== '') startCol--;
   } else {
     while (startRow > 0 && getCell(startRow - 1, startCol) !== '') startRow--;
   }
 
-  let r = startRow, c = startCol, ti = 0, tiles = '', reachedSelection = false;
+  // Walk forward building the tiles string
+  const lastPlaced = sorted[sorted.length - 1];
+  let r = startRow, c = startCol;
+  let tiles = '';
+
   while (r < dim && c < dim) {
     const existing = getCell(r, c);
-    if (r === selection.row && c === selection.col) reachedSelection = true;
-    if (existing) { tiles += '.'; }
-    else if (reachedSelection && ti < tileInput.length) { tiles += tileInput[ti]; ti++; }
-    else if (!reachedSelection) { break; }
-    else { break; }
+    const placed = placedMap.get(`${r},${c}`);
+
+    if (existing) {
+      tiles += '.';
+    } else if (placed) {
+      tiles += placed;
+    } else {
+      // Gap — if we haven't reached the last placed tile, there's a contiguity error
+      if (isAcross ? c < lastPlaced.col : r < lastPlaced.row) {
+        return null; // non-contiguous
+      }
+      break;
+    }
+
     if (isAcross) c++; else r++;
   }
+
+  // Continue through any trailing existing tiles
   while (r < dim && c < dim) {
     const existing = getCell(r, c);
     if (!existing) break;
     tiles += '.';
     if (isAcross) c++; else r++;
   }
-  if (ti < tileInput.length) return null;
-  const coords = toCoords({ row: startRow, col: startCol, direction: selection.direction });
+
+  // Verify every placed tile was visited along the word path
+  let vr = startRow, vc = startCol;
+  const visitedPlaced = new Set<string>();
+  for (const ch of tiles) {
+    const key = `${vr},${vc}`;
+    if (placedMap.has(key)) visitedPlaced.add(key);
+    if (isAcross) vc++; else vr++;
+  }
+  for (const t of placedTiles) {
+    if (!visitedPlaced.has(`${t.row},${t.col}`)) return null;
+  }
+
+  const coords = toCoords({ row: startRow, col: startCol, direction });
   return { coords, tiles };
 }
 
-function buildPreview(
-  board: string[][] | undefined,
-  selection: BoardSelection | null,
-  tileInput: string,
-): Map<string, string> {
+/** Find the start cell of the word formed by placed tiles (including run-up of existing tiles) */
+function getWordStartCell(
+  board: string[][],
+  placedTiles: PlacedTile[],
+): { row: number; col: number; isAcross: boolean } | null {
+  if (placedTiles.length === 0) return null;
+  const direction = detectDirection(placedTiles, board);
+  const isAcross = direction === 'across';
+  const sorted = [...placedTiles].sort((a, b) => isAcross ? a.col - b.col : a.row - b.row);
+  let startRow = sorted[0].row;
+  let startCol = sorted[0].col;
+  if (isAcross) {
+    while (startCol > 0 && (board[startRow]?.[startCol - 1] || '') !== '') startCol--;
+  } else {
+    while (startRow > 0 && (board[startRow - 1]?.[startCol] || '') !== '') startRow--;
+  }
+  return { row: startRow, col: startCol, isAcross };
+}
+
+/** Build preview map from PlacedTile array */
+function buildPreviewFromPlaced(placedTiles: PlacedTile[]): Map<string, string> {
   const preview = new Map<string, string>();
-  if (!selection || !tileInput || !board) return preview;
-  const dim = board.length;
-  let r = selection.row, c = selection.col, ti = 0;
-  while (ti < tileInput.length && r < dim && c < dim) {
-    const existing = board[r]?.[c] || '';
-    if (existing) {
-      if (selection.direction === 'across') c++; else r++;
-      continue;
-    }
-    preview.set(`${r},${c}`, tileInput[ti]);
-    ti++;
-    if (selection.direction === 'across') c++; else r++;
+  for (const t of placedTiles) {
+    preview.set(`${t.row},${t.col}`, t.letter);
   }
   return preview;
 }
 
 /** Find the next empty square where the cursor should appear */
-function getCursorPos(
+export function getCursorPos(
   board: string[][] | undefined,
   selection: BoardSelection | null,
-  tileInput: string,
+  placedTiles: PlacedTile[],
 ): { row: number; col: number } | null {
   if (!selection || !board) return null;
   const dim = board.length;
-  let r = selection.row, c = selection.col, ti = 0;
+  const placedSet = new Set(placedTiles.map(t => `${t.row},${t.col}`));
+  let r = selection.row, c = selection.col;
   while (r < dim && c < dim) {
     const existing = board[r]?.[c] || '';
-    if (!existing) {
-      if (ti >= tileInput.length) return { row: r, col: c };
-      ti++;
+    if (!existing && !placedSet.has(`${r},${c}`)) {
+      return { row: r, col: c };
     }
     if (selection.direction === 'across') c++; else r++;
   }
@@ -155,11 +243,31 @@ function v(name: string): string {
   return `var(${name})`;
 }
 
-export function Board({ state, selection, tileInput, cellSize = 36, onSquareClick }: BoardProps) {
+export function Board({ state, selection, placedTiles, cellSize = 36, previewScore, onSquareClick, onBoardPointerDown }: BoardProps) {
   const dim = state?.board?.length || 15;
   const labelSize = Math.round(cellSize * 0.5);
-  const preview = buildPreview(state?.board, selection, tileInput);
-  const cursorPos = getCursorPos(state?.board, selection, tileInput);
+  const preview = buildPreviewFromPlaced(placedTiles);
+  const cursorPos = getCursorPos(state?.board, selection, placedTiles);
+  const lastMoveCells = getLastMoveCells(state?.lastMove);
+
+  // Score chip position: cell before the word start
+  const scoreChip = (() => {
+    if (previewScore == null || !state?.board) return null;
+    const ws = getWordStartCell(state.board, placedTiles);
+    if (!ws) return null;
+    const gap = 1;
+    const gridLeft = labelSize + 1;
+    const gridTop = labelSize + 1;
+    let cx: number, cy: number;
+    if (ws.isAcross) {
+      cx = gridLeft + (ws.col - 1) * (cellSize + gap) + cellSize / 2;
+      cy = gridTop + ws.row * (cellSize + gap) + cellSize / 2;
+    } else {
+      cx = gridLeft + ws.col * (cellSize + gap) + cellSize / 2;
+      cy = gridTop + (ws.row - 1) * (cellSize + gap) + cellSize / 2;
+    }
+    return { cx, cy };
+  })();
 
   const bonusBg: Record<string, string> = {
     tw: v('--tw'), dw: v('--dw'), tl: v('--tl'), dl: v('--dl'),
@@ -169,7 +277,30 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
   };
 
   return (
-    <div style={{ display: 'inline-block' }}>
+    <div style={{ display: 'inline-block', position: 'relative' }}>
+      {scoreChip && (
+        <div style={{
+          position: 'absolute',
+          left: scoreChip.cx, top: scoreChip.cy,
+          transform: 'translate(-50%, -50%)',
+          background: v('--tile-bg'),
+          outline: `2px solid ${v('--accent-green')}`,
+          outlineOffset: '-2px',
+          borderRadius: 6,
+          minWidth: Math.round(cellSize * 0.85),
+          height: Math.round(cellSize * 0.72),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: Math.round(cellSize * 0.34),
+          fontWeight: 700,
+          fontFamily: "'Lexend', sans-serif",
+          color: v('--cw'),
+          zIndex: 10,
+          pointerEvents: 'none',
+          padding: '0 4px',
+        }}>
+          {previewScore}
+        </div>
+      )}
       <div style={{
         display: 'inline-flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden',
         boxShadow: v('--board-shadow'), lineHeight: 0, background: v('--board-bg'),
@@ -213,11 +344,14 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
               const isSelected = cursorPos && cursorPos.row === row && cursorPos.col === col;
               const isBlank = hasTile && letter === letter.toLowerCase();
               const isPreviewBlank = isPreview && previewLetter === previewLetter!.toLowerCase();
+              const cellKey = `${row},${col}`;
+              const isLastMove = !isPreview && hasTile && lastMoveCells.has(cellKey);
 
               let bg = v('--board-bg');
               if (!hasTile && !isPreview && bonus) bg = bonusBg[bonus];
               if (!hasTile && !isPreview && isCenter && !bonus) bg = v('--center');
-              if (isPreview) bg = v('--tile-preview-bg');
+              if (hasTile && !isLastMove) bg = v('--tile-bg');
+              if (isLastMove) bg = v('--tile-last-bg');
 
               const selColor = isSelected && bonus ? bonusText[bonus] : v('--cw');
 
@@ -225,15 +359,16 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
                 <div
                   key={col}
                   onClick={() => onSquareClick(row, col)}
+                  onPointerDown={isPreview && onBoardPointerDown ? (e) => onBoardPointerDown(row, col, e) : undefined}
                   style={{
                     width: cellSize, height: cellSize,
                     border: isSelected ? `2px solid ${selColor}` : 'none',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: hasTile ? v('--tile-bg') : bg,
+                    background: isPreview ? v('--tile-bg') : hasTile ? bg : bg,
                     fontSize: (hasTile || isPreview) ? Math.round(cellSize * 0.44) : Math.round(cellSize * 0.25),
                     fontWeight: (hasTile || isPreview) ? 600 : 500,
                     color: isPreview
-                      ? (isPreviewBlank ? v('--tile-preview-blank') : v('--tile-preview-text'))
+                      ? (isPreviewBlank ? v('--cw-blank') : v('--cw'))
                       : hasTile
                       ? (isBlank ? v('--cw-blank') : v('--cw'))
                       : (bonus ? bonusText[bonus] : v('--text-muted')),
@@ -245,6 +380,7 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
                     borderRadius: 0,
                     lineHeight: '1', cursor: 'pointer',
                     paddingBottom: 2,
+                    touchAction: isPreview ? 'none' : undefined,
                   }}
                   title={`${String.fromCharCode(65 + col)}${row + 1}`}
                 >
@@ -266,7 +402,7 @@ export function Board({ state, selection, tileInput, cellSize = 36, onSquareClic
                   })()}
                   {isPreview
                     ? <>
-                        {previewLetter}
+                        {previewLetter!.toUpperCase()}
                         {!isPreviewBlank && TILE_VALUES[previewLetter!.toUpperCase()] && (
                           <span style={{ position:'absolute', bottom: Math.round(cellSize * 0.08), right: Math.round(cellSize * 0.08), fontSize: Math.round(cellSize * 0.22), fontWeight:600, color: v('--tile-preview-text'), opacity:0.6 }}>
                             {TILE_VALUES[previewLetter!.toUpperCase()]}

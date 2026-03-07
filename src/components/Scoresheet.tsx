@@ -6,6 +6,7 @@ interface ScoresheetProps {
   state: GameState | null;
   statusMsg: string;
   onNavigate: (turn: number) => void;
+  gameOver?: boolean;
 }
 
 function formatPlayedTiles(playedTiles: string, wordsFormed?: string[]): string {
@@ -13,9 +14,19 @@ function formatPlayedTiles(playedTiles: string, wordsFormed?: string[]): string 
   const mainWord = wordsFormed[0];
   if (mainWord.length !== playedTiles.length) return playedTiles;
   let result = '';
-  for (let i = 0; i < playedTiles.length; i++) {
-    if (playedTiles[i] === '.') result += `(${mainWord[i]})`;
-    else result += playedTiles[i];
+  let i = 0;
+  while (i < playedTiles.length) {
+    if (playedTiles[i] === '.') {
+      let group = '';
+      while (i < playedTiles.length && playedTiles[i] === '.') {
+        group += mainWord[i];
+        i++;
+      }
+      result += `(${group})`;
+    } else {
+      result += playedTiles[i];
+      i++;
+    }
   }
   return result;
 }
@@ -133,9 +144,32 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       });
       i++;
     } else if (evt.type === 'PASS') {
+      const isFinalPass = next?.type === 'END_RACK_PTS';
       cells.push({
-        description: 'Pass',
+        description: isFinalPass ? '' : 'Pass',
         scoreText: '',
+        rack: undefined,
+        cumulative: evt.cumulative,
+        playerIndex: evt.playerIndex,
+        turn: evt.turn,
+        isPhony: false,
+      });
+      i++;
+    } else if (evt.type === 'END_RACK_PTS') {
+      cells.push({
+        description: `Tiles: ${evt.rack || ''}`,
+        scoreText: evt.endRackPoints ? `+${evt.endRackPoints}` : '',
+        rack: undefined,
+        cumulative: evt.cumulative,
+        playerIndex: evt.playerIndex,
+        turn: evt.turn,
+        isPhony: false,
+      });
+      i++;
+    } else if (evt.type === 'END_RACK_PENALTY') {
+      cells.push({
+        description: `Tiles: ${evt.rack || ''}`,
+        scoreText: evt.lostScore ? `-${evt.lostScore}` : '',
         rack: undefined,
         cumulative: evt.cumulative,
         playerIndex: evt.playerIndex,
@@ -168,7 +202,7 @@ const FULL_DISTRIBUTION: Record<string, number> = {
 const VOWELS = new Set(['A','E','I','O','U']);
 const LETTER_ORDER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ?'.split('');
 
-function computeRemaining(board: string[][]) {
+function computeRemaining(board: string[][], rack: string) {
   const used: Record<string, number> = {};
   for (const row of board) {
     for (const cell of row) {
@@ -178,6 +212,10 @@ function computeRemaining(board: string[][]) {
       }
     }
   }
+  for (const ch of rack) {
+    const key = ch === '?' ? '?' : ch.toUpperCase();
+    used[key] = (used[key] || 0) + 1;
+  }
   const remaining: Record<string, number> = {};
   for (const letter of LETTER_ORDER) {
     remaining[letter] = Math.max(0, (FULL_DISTRIBUTION[letter] || 0) - (used[letter] || 0));
@@ -185,7 +223,7 @@ function computeRemaining(board: string[][]) {
   return remaining;
 }
 
-export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetProps) {
+export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: ScoresheetProps) {
   const playerNames = state?.playerNames || ['Player 1', 'Player 2'];
   const onTurn = state?.onTurn ?? -1;
 
@@ -300,8 +338,8 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
       </div>
 
       {/* Unseen tiles — pinned at bottom */}
-      {state && (() => {
-        const remaining = computeRemaining(state.board);
+      {state && !gameOver && (() => {
+        const remaining = computeRemaining(state.board, state.rack);
         let vowelCount = 0, consonantCount = 0;
         for (const letter of LETTER_ORDER) {
           if (letter === '?') continue;
@@ -315,7 +353,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate }: ScoresheetP
               marginBottom: 6,
             }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
-                {state.bagCount} tiles unseen
+                {state.bagCount} in bag
               </span>
               <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden' }}>
                 <span style={{

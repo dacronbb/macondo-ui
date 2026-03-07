@@ -1,14 +1,18 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from './api/client';
-import type { GameState, MoveInfo, EventInfo } from './api/types';
-import { Board, toCoords, buildMoveString, formatPlayThrough } from './components/Board';
+import type { GameState, MoveInfo, EventInfo, PlacedTile } from './api/types';
+import { Board, toCoords, buildMoveStringFromPlaced, formatPlayThrough, getCursorPos } from './components/Board';
 import type { BoardSelection } from './components/Board';
 import { Rack } from './components/Rack';
 import { MoveList } from './components/MoveList';
 import { Scoresheet } from './components/Scoresheet';
-// Controls moved to action bar below the board
 import { Settings } from './components/Settings';
 import { ExchangeModal } from './components/ExchangeModal';
+import { BlankPickerModal } from './components/BlankPickerModal';
+import { DragGhost } from './components/DragGhost';
+import { Toast } from './components/Toast';
+import type { ToastMessage } from './components/Toast';
+import { useDragAndDrop } from './hooks/useDragAndDrop';
 import './App.css';
 
 function App() {
@@ -17,6 +21,21 @@ function App() {
   const [history, setHistory] = useState<EventInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const toastIdRef = useRef(0);
+  const [analyzeMode, setAnalyzeMode] = useState(false);
+  const showToast = useCallback((text: string) => {
+    setToasts(prev => {
+      const existing = prev.find(t => t.text === text);
+      if (existing) {
+        return prev.map(t => t.text === text ? { ...t, version: t.version + 1 } : t);
+      }
+      return [...prev, { id: ++toastIdRef.current, text, version: 0 }];
+    });
+  }, []);
+  const dismissToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
   const [statusMsg, setStatusMsg] = useState('');
 
   // Settings state
@@ -57,13 +76,56 @@ function App() {
 
   // Board interaction state
   const [selection, setSelection] = useState<BoardSelection | null>(null);
-  const [tileInput, setTileInput] = useState('');
+  const [placedTiles, setPlacedTiles] = useState<PlacedTile[]>([]);
+  const [localRack, setLocalRack] = useState<string[]>([]);
+  const [previewScore, setPreviewScore] = useState<number | null>(null);
+  const [moveValid, setMoveValid] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Blank picker state
+  const [pendingBlank, setPendingBlank] = useState<{ row: number; col: number; rackIndex: number } | null>(null);
+
+  // Refs for drag-and-drop hit testing
+  const boardRef = useRef<HTMLDivElement>(null);
+  const rackRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   // Fetch available lexicons on mount
   useEffect(() => {
     api.getLexicons().then(setLexicons).catch(() => {});
   }, []);
+
+  // Initialize localRack from state.rack whenever server state changes
+  useEffect(() => {
+    if (state) {
+      setLocalRack(state.rack.split(''));
+    }
+  }, [state]);
+
+  // Fetch score preview when placed tiles change; also drives move validity
+  useEffect(() => {
+    if (!state || placedTiles.length === 0) {
+      setPreviewScore(null);
+      setMoveValid(false);
+      return;
+    }
+    const move = buildMoveStringFromPlaced(state.board, placedTiles);
+    if (!move) {
+      setPreviewScore(null);
+      setMoveValid(false);
+      return;
+    }
+    const { coords, tiles } = move;
+    // Reset while waiting for validation
+    setPreviewScore(null);
+    setMoveValid(false);
+    const timer = setTimeout(() => {
+      api.scoreMove(coords, tiles)
+        .then(r => { setPreviewScore(r.score); setMoveValid(true); })
+        .catch(() => { setPreviewScore(null); setMoveValid(false); });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [placedTiles, state]);
 
   const clearError = () => setError(null);
 
@@ -73,7 +135,7 @@ function App() {
     try {
       return await fn();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      showToast(e instanceof Error ? e.message : String(e));
       return undefined;
     } finally {
       setLoading(false);
@@ -89,17 +151,21 @@ function App() {
     }
   }, []);
 
+  const clearBoard = useCallback(() => {
+    setSelection(null);
+    setPlacedTiles([]);
+  }, []);
+
   const handleNewGame = useCallback(async () => {
     const s = await withLoading(() => api.newGame(lexicon, challengeRule));
     if (s) {
       setState(s);
       setMoves([]);
       setHistory([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       setStatusMsg(`New game (${s.lexicon}, ${s.challengeRule})`);
     }
-  }, [withLoading, lexicon, challengeRule]);
+  }, [withLoading, lexicon, challengeRule, clearBoard]);
 
   const handleGenerate = useCallback(async () => {
     const m = await withLoading(() => api.generate(15));
@@ -111,28 +177,68 @@ function App() {
   }, [withLoading]);
 
   const handleAddMove = useCallback((index: number) => {
+    if (!state) return;
     const move = moves.find(m => m.index === index);
     if (!move || move.action !== 'play' || !move.coords || !move.tiles) return;
+
     // Parse coords into selection
     const acrossMatch = move.coords.match(/^(\d+)([A-O])$/);
     const downMatch = move.coords.match(/^([A-O])(\d+)$/);
+    let startRow: number, startCol: number, direction: 'across' | 'down';
     if (acrossMatch) {
-      setSelection({ row: parseInt(acrossMatch[1]) - 1, col: acrossMatch[2].charCodeAt(0) - 65, direction: 'across' });
+      startRow = parseInt(acrossMatch[1]) - 1;
+      startCol = acrossMatch[2].charCodeAt(0) - 65;
+      direction = 'across';
     } else if (downMatch) {
-      setSelection({ row: parseInt(downMatch[2]) - 1, col: downMatch[1].charCodeAt(0) - 65, direction: 'down' });
+      startRow = parseInt(downMatch[2]) - 1;
+      startCol = downMatch[1].charCodeAt(0) - 65;
+      direction = 'down';
     } else return;
-    // Strip play-through markers (dots) — the board preview skips occupied squares automatically
-    setTileInput(move.tiles.replace(/\./g, ''));
+
+    // Build PlacedTiles from the move tiles string
+    const newPlaced: PlacedTile[] = [];
+    const rackLetters = state.rack.split('');
+    const usedRackIndices: number[] = [];
+    let r = startRow, c = startCol;
+
+    for (const ch of move.tiles) {
+      if (ch === '.') {
+        // play-through — skip
+      } else {
+        // Find matching rack tile
+        const isBlankPlay = ch === ch.toLowerCase();
+        let rackIdx = -1;
+        if (isBlankPlay) {
+          rackIdx = rackLetters.findIndex((l, i) => l === '?' && !usedRackIndices.includes(i));
+        } else {
+          rackIdx = rackLetters.findIndex((l, i) => l === ch && !usedRackIndices.includes(i));
+          if (rackIdx === -1) {
+            // Try blank
+            rackIdx = rackLetters.findIndex((l, i) => l === '?' && !usedRackIndices.includes(i));
+          }
+        }
+        if (rackIdx !== -1) {
+          usedRackIndices.push(rackIdx);
+          newPlaced.push({ row: r, col: c, letter: ch, rackIndex: rackIdx });
+        }
+      }
+      if (direction === 'across') c++; else r++;
+    }
+
+    setPlacedTiles(newPlaced);
+    // Update localRack: remove used tiles
+    const newRack = rackLetters.filter((_, i) => !usedRackIndices.includes(i));
+    setLocalRack(newRack);
+    setSelection({ row: startRow, col: startCol, direction });
     setTimeout(() => inputRef.current?.focus(), 0);
-  }, [moves]);
+  }, [moves, state]);
 
   const handlePlayMove = useCallback(async (index: number) => {
     const s = await withLoading(() => api.playMoveFromList(index));
     if (s) {
       setState(s);
       setMoves([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       await refreshHistory();
       if (s.phonyChallenged) {
         setStatusMsg(`PHONY CHALLENGED! Move #${index} was removed from the board.`);
@@ -140,46 +246,43 @@ function App() {
         setStatusMsg(`Played move #${index}`);
       }
     }
-  }, [withLoading, refreshHistory]);
+  }, [withLoading, refreshHistory, clearBoard]);
 
   const handleAIPlay = useCallback(async () => {
     const result = await withLoading(() => api.aiPlay());
     if (result) {
       setState(result.state);
       setMoves([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       await refreshHistory();
       const parts = result.move.split(' ');
       const aiCoords = parts[0], aiTiles = parts[1] || '';
       setStatusMsg(`AI played: ${aiCoords} ${formatPlayThrough(aiTiles, aiCoords, result.state.board)} (+${result.score})`);
     }
-  }, [withLoading, refreshHistory]);
+  }, [withLoading, refreshHistory, clearBoard]);
 
   const handlePass = useCallback(async () => {
     const s = await withLoading(() => api.playPass());
     if (s) {
       setState(s);
       setMoves([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       await refreshHistory();
       setStatusMsg('Passed');
     }
-  }, [withLoading, refreshHistory]);
+  }, [withLoading, refreshHistory, clearBoard]);
 
   const handleExchange = useCallback(async (tiles: string) => {
     const s = await withLoading(() => api.playExchange(tiles));
     if (s) {
       setState(s);
       setMoves([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       setShowExchange(false);
       await refreshHistory();
       setStatusMsg(`Exchanged ${tiles.length} tile${tiles.length > 1 ? 's' : ''}`);
     }
-  }, [withLoading, refreshHistory]);
+  }, [withLoading, refreshHistory, clearBoard]);
 
   const handleNavigate = useCallback(async (action: string) => {
     const s = await withLoading(() => api.navigate(action));
@@ -199,6 +302,28 @@ function App() {
     }
   }, [withLoading]);
 
+  const handleExport = useCallback(async () => {
+    const result = await withLoading(() => api.exportGCG());
+    if (result) {
+      const blob = new Blob([result.gcg], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'game.gcg';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }, [withLoading]);
+
+  const handleExit = useCallback(() => {
+    setState(null);
+    setHistory([]);
+    setMoves([]);
+    clearBoard();
+    setAnalyzeMode(false);
+    setStatusMsg('');
+  }, [clearBoard]);
+
   // Challenge the last play
   const handleChallenge = useCallback(async () => {
     const s = await withLoading(() => api.challenge());
@@ -212,85 +337,196 @@ function App() {
 
   // Shuffle rack tiles randomly
   const handleShuffle = useCallback(() => {
-    if (!state) return;
-    const letters = state.rack.split('');
-    for (let i = letters.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [letters[i], letters[j]] = [letters[j], letters[i]];
-    }
-    setState(prev => prev ? { ...prev, rack: letters.join('') } : prev);
-  }, [state]);
-
-  // Recall tiles from board (clear selection and typed tiles)
-  const handleRecall = useCallback(() => {
-    setSelection(null);
-    setTileInput('');
+    setLocalRack(prev => {
+      const letters = [...prev];
+      for (let i = letters.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [letters[i], letters[j]] = [letters[j], letters[i]];
+      }
+      return letters;
+    });
   }, []);
 
-  // Board square click: set selection or toggle direction
+  // Recall tiles from board (clear selection and placed tiles, reset rack)
+  const handleRecall = useCallback(() => {
+    clearBoard();
+    if (state) {
+      setLocalRack(state.rack.split(''));
+    }
+  }, [clearBoard, state]);
+
+  // Board square click: re-open blank picker if clicking a placed blank, otherwise set selection
   const handleSquareClick = useCallback((row: number, col: number) => {
+    const placedBlank = placedTiles.find(t => t.row === row && t.col === col && t.letter === t.letter.toLowerCase());
+    if (placedBlank) {
+      setPendingBlank({ row, col, rackIndex: placedBlank.rackIndex });
+      return;
+    }
     setSelection(prev => {
       if (prev && prev.row === row && prev.col === col) {
-        // Click same square: toggle direction
         return { row, col, direction: prev.direction === 'across' ? 'down' : 'across' };
       }
-      // New square: default to across
       return { row, col, direction: 'across' };
     });
-    setTileInput('');
-    // Focus the input after selection
+    // Don't clear placed tiles on click — user may want to add more tiles via keyboard
     setTimeout(() => inputRef.current?.focus(), 0);
+  }, [placedTiles]);
+
+  // --- Drag-and-drop handlers ---
+
+  const handlePlaceTile = useCallback((tile: PlacedTile) => {
+    setPlacedTiles(prev => [...prev, tile]);
+    setLocalRack(prev => {
+      const next = [...prev];
+      // Find and remove the tile at rackIndex — but since indices shift as tiles are removed,
+      // we need to find the actual tile. The rackIndex refers to the current localRack position.
+      next.splice(tile.rackIndex, 1);
+      return next;
+    });
   }, []);
 
-  // Build remaining rack after accounting for already-typed letters in tileInput.
-  // Uppercase in tileInput = used a real tile, lowercase = used a blank.
-  const getRemainingRack = useCallback((currentInput: string): string[] => {
-    if (!state) return [];
-    const remaining = state.rack.split('');
-    for (const ch of currentInput) {
-      if (ch === ch.toLowerCase()) {
-        // lowercase = blank was used
-        const blankIdx = remaining.indexOf('?');
-        if (blankIdx !== -1) remaining.splice(blankIdx, 1);
-      } else {
-        const idx = remaining.indexOf(ch);
-        if (idx !== -1) remaining.splice(idx, 1);
+  const handleRemovePlacedTile = useCallback((row: number, col: number) => {
+    setPlacedTiles(prev => {
+      const tile = prev.find(t => t.row === row && t.col === col);
+      if (tile) {
+        // Return tile to rack
+        setLocalRack(rk => {
+          const next = [...rk];
+          const returnLetter = tile.letter === tile.letter.toLowerCase() ? '?' : tile.letter;
+          next.push(returnLetter);
+          return next;
+        });
       }
-    }
-    return remaining;
-  }, [state]);
+      return prev.filter(t => !(t.row === row && t.col === col));
+    });
+  }, []);
 
-  // Determine how a typed letter should be stored: uppercase if available on rack, lowercase if using blank.
-  // If forceBlank is true, use a blank even if the real tile is available.
-  // Returns the character to store, or null if the letter can't be played.
-  const resolveTypedLetter = useCallback((letter: string, currentInput: string, forceBlank = false): string | null => {
-    if (!state) return null;
+  const handleMovePlacedTile = useCallback((fromRow: number, fromCol: number, toRow: number, toCol: number) => {
+    setPlacedTiles(prev => prev.map(t =>
+      t.row === fromRow && t.col === fromCol
+        ? { ...t, row: toRow, col: toCol }
+        : t
+    ));
+  }, []);
+
+  const handleReturnToRack = useCallback((row: number, col: number, insertIndex: number) => {
+    setPlacedTiles(prev => {
+      const tile = prev.find(t => t.row === row && t.col === col);
+      if (tile) {
+        const returnLetter = tile.letter === tile.letter.toLowerCase() ? '?' : tile.letter;
+        setLocalRack(rk => {
+          const next = [...rk];
+          const idx = Math.min(insertIndex, next.length);
+          next.splice(idx, 0, returnLetter);
+          return next;
+        });
+      }
+      return prev.filter(t => !(t.row === row && t.col === col));
+    });
+  }, []);
+
+  const handleReorderRack = useCallback((fromIndex: number, toIndex: number) => {
+    setLocalRack(prev => {
+      const next = [...prev];
+      const [tile] = next.splice(fromIndex, 1);
+      const insertAt = toIndex > fromIndex ? toIndex - 1 : toIndex;
+      next.splice(Math.min(insertAt, next.length), 0, tile);
+      return next;
+    });
+  }, []);
+
+  const handleBlankDrop = useCallback((row: number, col: number, rackIndex: number) => {
+    // Remove from rack immediately, show picker
+    setLocalRack(prev => {
+      const next = [...prev];
+      next.splice(rackIndex, 1);
+      return next;
+    });
+    setPendingBlank({ row, col, rackIndex });
+  }, []);
+
+  const handleBlankPick = useCallback((letter: string) => {
+    if (!pendingBlank) return;
+    const { row, col, rackIndex } = pendingBlank;
+    setPlacedTiles(prev => {
+      const exists = prev.some(t => t.row === row && t.col === col);
+      if (exists) {
+        return prev.map(t => t.row === row && t.col === col ? { ...t, letter: letter.toLowerCase() } : t);
+      }
+      return [...prev, { row, col, letter: letter.toLowerCase(), rackIndex }];
+    });
+    setPendingBlank(null);
+  }, [pendingBlank]);
+
+  const handleBlankCancel = useCallback(() => {
+    if (!pendingBlank) return;
+    const { row, col, rackIndex } = pendingBlank;
+    const alreadyPlaced = placedTiles.some(t => t.row === row && t.col === col);
+    if (!alreadyPlaced) {
+      // Return blank to rack (fresh drop cancelled)
+      setLocalRack(prev => {
+        const next = [...prev];
+        next.splice(Math.min(rackIndex, next.length), 0, '?');
+        return next;
+      });
+    }
+    setPendingBlank(null);
+  }, [pendingBlank, placedTiles]);
+
+  // Dynamic board sizing
+  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const cellSize = useMemo(() => {
+    const dim = 15;
+    const overhead = 32 + 54 + 48 + 32;
+    const availableHeight = viewportHeight - overhead;
+    const computed = Math.floor(availableHeight / (dim + 1));
+    return Math.max(24, Math.min(computed, 48));
+  }, [viewportHeight]);
+
+  const { dragState, onRackPointerDown, onBoardPointerDown } = useDragAndDrop({
+    boardRef,
+    rackRef,
+    placedTiles,
+    localRack,
+    board: state?.board,
+    cellSize,
+    onPlaceTile: handlePlaceTile,
+    onRemovePlacedTile: handleRemovePlacedTile,
+    onMovePlacedTile: handleMovePlacedTile,
+    onReturnToRack: handleReturnToRack,
+    onReorderRack: handleReorderRack,
+    onBlankDrop: handleBlankDrop,
+  });
+
+  // --- Keyboard input ---
+
+  // Resolve typed letter against localRack (not state.rack)
+  const resolveTypedLetter = useCallback((letter: string, forceBlank = false): { stored: string; rackIndex: number } | null => {
     if (!/^[A-Z]$/.test(letter)) return null;
-    const remaining = getRemainingRack(currentInput);
     if (forceBlank) {
-      if (remaining.indexOf('?') !== -1) return letter.toLowerCase();
+      const idx = localRack.indexOf('?');
+      if (idx !== -1) return { stored: letter.toLowerCase(), rackIndex: idx };
       return null;
     }
-    if (remaining.indexOf(letter) !== -1) return letter; // real tile
-    if (remaining.indexOf('?') !== -1) return letter.toLowerCase(); // blank
+    const idx = localRack.indexOf(letter);
+    if (idx !== -1) return { stored: letter, rackIndex: idx };
+    const blankIdx = localRack.indexOf('?');
+    if (blankIdx !== -1) return { stored: letter.toLowerCase(), rackIndex: blankIdx };
     return null;
-  }, [state, getRemainingRack]);
+  }, [localRack]);
 
-  // Handle input onChange — only for deletions (backspace). Letter entry is via onKeyDown.
-  const handleTileInputChange = useCallback((newValue: string) => {
-    // If shorter than current, user deleted — allow it
-    if (newValue.length < tileInput.length) {
-      setTileInput(newValue);
-    }
-    // Otherwise ignore — letter additions are handled by onKeyDown
-  }, [tileInput]);
-
-  // Submit a typed move
+  // Submit a placed move
   const handleSubmitTiledMove = useCallback(async () => {
-    if (!selection || !tileInput.trim() || !state?.board) return;
-    const move = buildMoveString(state.board, selection, tileInput.trim());
+    if (placedTiles.length === 0 || !state?.board) return;
+    const move = buildMoveStringFromPlaced(state.board, placedTiles);
     if (!move) {
-      setError('Could not build a valid move from the typed tiles.');
+      showToast('Please make a valid move');
       return;
     }
     const { coords, tiles } = move;
@@ -298,8 +534,7 @@ function App() {
     if (s) {
       setState(s);
       setMoves([]);
-      setSelection(null);
-      setTileInput('');
+      clearBoard();
       await refreshHistory();
       if (s.phonyChallenged) {
         setStatusMsg(`PHONY CHALLENGED! "${formatPlayThrough(tiles, coords, state?.board)}" at ${coords} was removed from the board.`);
@@ -307,60 +542,116 @@ function App() {
         setStatusMsg(`Played: ${coords} ${formatPlayThrough(tiles, coords, state?.board)}`);
       }
     }
-  }, [selection, tileInput, state, withLoading, refreshHistory]);
+  }, [placedTiles, state, withLoading, refreshHistory, clearBoard]);
 
-  // Handle keyboard on the input: letters, Enter, Escape, Backspace
+  // Update selection direction based on placed tiles
+  useEffect(() => {
+    if (placedTiles.length >= 2 && state?.board) {
+      const allSameRow = placedTiles.every(t => t.row === placedTiles[0].row);
+      const allSameCol = placedTiles.every(t => t.col === placedTiles[0].col);
+      const newDir = allSameRow ? 'across' : allSameCol ? 'down' : undefined;
+      if (newDir) {
+        setSelection(prev => {
+          if (!prev || prev.direction === newDir) return prev;
+          return { ...prev, direction: newDir };
+        });
+      }
+    }
+  }, [placedTiles, state?.board]);
+
+  // Handle keyboard input
   const handleInputKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleSubmitTiledMove();
     } else if (e.key === 'Escape') {
-      setSelection(null);
-      setTileInput('');
+      handleRecall();
     } else if (e.key === 'Backspace') {
-      // Let default behavior handle it (controlled input will update via onChange)
-      return;
+      e.preventDefault();
+      // Remove the last placed tile
+      if (placedTiles.length > 0) {
+        const last = placedTiles[placedTiles.length - 1];
+        const returnLetter = last.letter === last.letter.toLowerCase() ? '?' : last.letter;
+        setPlacedTiles(prev => prev.slice(0, -1));
+        setLocalRack(prev => [...prev, returnLetter]);
+      }
     } else if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
       e.preventDefault();
+      if (!selection || !state?.board) return;
       const upper = e.key.toUpperCase();
-      const resolved = resolveTypedLetter(upper, tileInput, e.shiftKey);
-      if (resolved) setTileInput(prev => prev + resolved);
-    }
-  }, [handleSubmitTiledMove, tileInput, resolveTypedLetter]);
+      const resolved = resolveTypedLetter(upper, e.shiftKey);
+      if (!resolved) return;
 
-  // Global keydown: if a square is selected and user starts typing, focus the input
+      // Find cursor position (next empty square)
+      const cursor = getCursorPos(state.board, selection, placedTiles);
+      if (!cursor) return;
+
+      const newTile: PlacedTile = {
+        row: cursor.row,
+        col: cursor.col,
+        letter: resolved.stored,
+        rackIndex: resolved.rackIndex,
+      };
+      setPlacedTiles(prev => [...prev, newTile]);
+      setLocalRack(prev => {
+        const next = [...prev];
+        next.splice(resolved.rackIndex, 1);
+        return next;
+      });
+    }
+  }, [handleSubmitTiledMove, handleRecall, selection, state?.board, placedTiles, resolveTypedLetter]);
+
+  // Global keydown: capture typing when a square is selected
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
       if (!selection) return;
-      // Don't capture if already focused on an input
       if (document.activeElement === inputRef.current) return;
-      // Ignore modifier keys and special keys
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+        if (!state?.board) return;
         const upper = e.key.toUpperCase();
-        const resolved = resolveTypedLetter(upper, tileInput, e.shiftKey);
+        const resolved = resolveTypedLetter(upper, e.shiftKey);
         if (resolved) {
           e.preventDefault();
           inputRef.current?.focus();
-          setTileInput(prev => prev + resolved);
+          const cursor = getCursorPos(state.board, selection, placedTiles);
+          if (!cursor) return;
+          setPlacedTiles(prev => [...prev, {
+            row: cursor.row,
+            col: cursor.col,
+            letter: resolved.stored,
+            rackIndex: resolved.rackIndex,
+          }]);
+          setLocalRack(prev => {
+            const next = [...prev];
+            next.splice(resolved.rackIndex, 1);
+            return next;
+          });
         }
       }
       if (e.key === 'Escape') {
-        setSelection(null);
-        setTileInput('');
+        handleRecall();
       }
-      if (e.key === 'Enter' && tileInput.trim()) {
+      if (e.key === 'Enter' && moveValid) {
         e.preventDefault();
         handleSubmitTiledMove();
+      }
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        if (placedTiles.length > 0) {
+          const last = placedTiles[placedTiles.length - 1];
+          const returnLetter = last.letter === last.letter.toLowerCase() ? '?' : last.letter;
+          setPlacedTiles(prev => prev.slice(0, -1));
+          setLocalRack(prev => [...prev, returnLetter]);
+        }
       }
     };
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, [selection, tileInput, handleSubmitTiledMove, resolveTypedLetter]);
+  }, [selection, placedTiles, moveValid, handleSubmitTiledMove, handleRecall, resolveTypedLetter, state?.board]);
 
   const handleChangeRule = useCallback(async (rule: string) => {
     setChallengeRule(rule);
-    // If a game is active, change it immediately
     if (state) {
       const s = await withLoading(() => api.setSettings(rule));
       if (s) {
@@ -387,36 +678,32 @@ function App() {
         const mCoords = mp[0], mTiles = mp[1] || '';
         setStatusMsg(`maCATdo played: ${mCoords} ${formatPlayThrough(mTiles, mCoords, result.state.board)} (+${result.score})`);
       }
-    }, 500); // small delay so the human can see the board before bot plays
+    }, 500);
     return () => clearTimeout(timer);
   }, [state, loading, withLoading, refreshHistory]);
 
+  // Auto-pass to resolve WAITING_FOR_FINAL_PASS → triggers endOfGameCalcs and END_RACK_PTS event
+  useEffect(() => {
+    if (!state || loading) return;
+    if (state.playState !== 'WAITING_FOR_FINAL_PASS') return;
+    const timer = setTimeout(async () => {
+      const s = await withLoading(() => api.playPass());
+      if (s) {
+        setState(s);
+        setMoves([]);
+        clearBoard();
+        await refreshHistory();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [state, loading, withLoading, refreshHistory, clearBoard]);
+
   const isPlaying = state?.playState === 'PLAYING';
+  const isGameOver = state?.playState === 'GAME_OVER';
   const lastEvent = history.length > 0 ? history[history.length - 1] : null;
   const canChallenge = isPlaying && !!lastEvent?.position && state?.challengeRule !== 'VOID';
 
-  // Dynamic board sizing: maximize board to fit viewport height
-  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
-  useEffect(() => {
-    const onResize = () => setViewportHeight(window.innerHeight);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const cellSize = useMemo(() => {
-    const dim = 15;
-    // Vertical budget: 32px padding top + board + rack(~54) + action bar(~48) + 32px padding bottom
-    const overhead = 32 + 54 + 48 + 32;
-    const availableHeight = viewportHeight - overhead;
-    // Board height = dim * cellSize + 2 * labelSize, where labelSize = cellSize * 0.5
-    // So: availableHeight = dim * cellSize + cellSize => cellSize = availableHeight / (dim + 1)
-    const computed = Math.floor(availableHeight / (dim + 1));
-    return Math.max(24, Math.min(computed, 48)); // clamp between 24-48px
-  }, [viewportHeight]);
-
-  // Measure board and bottom (rack+action) heights for side panel alignment
-  const boardRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  // Measure board and bottom heights for side panel alignment
   const [boardHeight, setBoardHeight] = useState(0);
   const [bottomHeight, setBottomHeight] = useState(0);
 
@@ -438,10 +725,40 @@ function App() {
       <div className="main-layout">
         <div className="board-area">
           <div ref={boardRef}>
-            <Board state={state} selection={selection} tileInput={tileInput} cellSize={cellSize} onSquareClick={handleSquareClick} />
+            <Board
+              state={state}
+              selection={selection}
+              placedTiles={placedTiles}
+              cellSize={cellSize}
+              previewScore={previewScore}
+              onSquareClick={handleSquareClick}
+              onBoardPointerDown={onBoardPointerDown}
+            />
           </div>
           <div ref={bottomRef}>
-          {state && <Rack rack={state.rack} cellSize={cellSize} onShuffle={handleShuffle} onRecall={handleRecall} />}
+          {state && (isPlaying || analyzeMode) && (
+            <Rack
+              ref={rackRef}
+              localRack={localRack}
+              cellSize={cellSize}
+              onShuffle={handleShuffle}
+              onRecall={handleRecall}
+              onRackPointerDown={onRackPointerDown}
+              dragState={dragState}
+            />
+          )}
+
+          {isGameOver && !analyzeMode && (() => {
+            const winnerIdx = state.scores[0] > state.scores[1] ? 0 : state.scores[1] > state.scores[0] ? 1 : -1;
+            const winnerLine = winnerIdx === -1
+              ? `Draw! Final score: ${state.scores[0]} – ${state.scores[1]}`
+              : `${state.playerNames[winnerIdx]} wins. Final score: ${state.scores[winnerIdx]} – ${state.scores[1 - winnerIdx]}`;
+            return (
+              <div className="winner-module">
+                <span className="winner-line">{winnerLine}</span>
+              </div>
+            );
+          })()}
 
           {/* Action bar */}
           <div className="action-bar" ref={optionsRef}>
@@ -450,6 +767,21 @@ function App() {
                 <button className="action-btn action-btn-primary" onClick={handleNewGame} disabled={loading}>
                   Start Game
                 </button>
+              </div>
+            ) : (isGameOver && !analyzeMode) ? (
+              <div className="action-bar-inner">
+                <button className="action-btn" onClick={handleExport} disabled={loading}>Export GCG</button>
+                <button className="action-btn" onClick={() => { setAnalyzeMode(true); clearBoard(); }}>Analyze</button>
+                <button className="action-btn" onClick={handleExit} disabled={loading}>Exit</button>
+                <button className="action-btn action-btn-primary" onClick={handleNewGame} disabled={loading}>Rematch</button>
+              </div>
+            ) : analyzeMode ? (
+              <div className="action-bar-inner">
+                <button className="action-btn" onClick={() => handleNavigate('first')} disabled={loading}>|&lt;</button>
+                <button className="action-btn" onClick={() => handleNavigate('prev')} disabled={loading}>&lt; Prev</button>
+                <button className="action-btn" onClick={() => handleNavigate('next')} disabled={loading}>Next &gt;</button>
+                <button className="action-btn" onClick={() => handleNavigate('last')} disabled={loading}>&gt;|</button>
+                <button className="action-btn action-btn-primary" onClick={() => { setAnalyzeMode(false); clearBoard(); }}>Done</button>
               </div>
             ) : (
               <div className="action-bar-inner">
@@ -470,7 +802,7 @@ function App() {
                 <button
                   className="action-btn action-btn-primary"
                   onClick={handleSubmitTiledMove}
-                  disabled={!tileInput.trim() || loading}
+                  disabled={!moveValid || loading}
                 >
                   Play
                 </button>
@@ -506,8 +838,8 @@ function App() {
           <input
             ref={inputRef}
             type="text"
-            value={tileInput}
-            onChange={e => handleTileInputChange(e.target.value)}
+            value=""
+            onChange={() => {}}
             onKeyDown={handleInputKeyDown}
             style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
             tabIndex={-1}
@@ -520,7 +852,6 @@ function App() {
             <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>
-                {error && <span className="error-msg" onClick={clearError}>{error}</span>}
               </div>
               <Settings
                 currentRule={state?.challengeRule || challengeRule}
@@ -540,21 +871,22 @@ function App() {
               state={state}
               statusMsg={statusMsg}
               onNavigate={handleNavigateToTurn}
+              gameOver={isGameOver}
             />
           </div>
 
           {/* Bottom zone: generated moves — aligned with rack + action bar */}
-          <div className="panel-section" style={{ marginTop: 16, height: bottomHeight ? bottomHeight - 16 : undefined, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!isGameOver && <div className="panel-section" style={{ marginTop: 16, height: bottomHeight ? bottomHeight - 16 : undefined, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
               <h3 style={{ borderBottom: 'none' }}>Generated moves</h3>
               <button
                 onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
-                disabled={moves.length === 0 && (loading || !isPlaying)}
+                disabled={moves.length === 0 && (loading || (!isPlaying && !analyzeMode))}
                 style={{
                   background: 'none', border: 'none', color: 'var(--cw)',
                   fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
-                  cursor: (moves.length === 0 && (loading || !isPlaying)) ? 'not-allowed' : 'pointer',
-                  padding: '8px 12px', opacity: (moves.length === 0 && (loading || !isPlaying)) ? 0.5 : 1,
+                  cursor: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'not-allowed' : 'pointer',
+                  padding: '8px 12px', opacity: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 0.5 : 1,
                 }}
               >
                 {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
@@ -565,7 +897,7 @@ function App() {
                 <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} onAddMove={handleAddMove} />
               </div>
             )}
-          </div>
+          </div>}
         </div>
       </div>
 
@@ -577,6 +909,23 @@ function App() {
           loading={loading}
         />
       )}
+
+      {pendingBlank && (
+        <BlankPickerModal
+          onPick={handleBlankPick}
+          onCancel={handleBlankCancel}
+        />
+      )}
+
+      {dragState?.isDragging && (
+        <DragGhost
+          letter={dragState.source.letter}
+          pointerX={dragState.pointerX}
+          pointerY={dragState.pointerY}
+          cellSize={cellSize}
+        />
+      )}
+      <Toast messages={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

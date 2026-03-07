@@ -44,6 +44,15 @@ export interface EventInfo {
   isBingo?: boolean;
   note?: string;
   wordsFormed?: string[];
+  endRackPoints?: number;
+  lostScore?: number;
+}
+
+export interface PlacedTile {
+  row: number;
+  col: number;
+  letter: string;     // uppercase = real tile, lowercase = blank
+  rackIndex: number;   // original index in localRack for returns
 }
 
 export interface APIResponse<T> {

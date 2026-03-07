@@ -75,7 +75,7 @@
 /* Action bar below the rack */
 .action-bar {
   position: relative;
-  padding-top: 8px;
+  padding-top: 16px;
 }
 
 .action-bar-inner {
@@ -100,6 +100,7 @@
 .action-btn:disabled {
   color: var(--text-disabled);
   border-color: var(--border-strong);
+  box-shadow: none;
   cursor: not-allowed;
 }
 
@@ -113,6 +114,7 @@
   background: var(--bg-raised);
   color: var(--text-disabled);
   border-color: var(--border-strong);
+  box-shadow: none;
 }
 
 /* Options dropdown */
@@ -156,6 +158,23 @@
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+.winner-module {
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: var(--bg-raised);
+  border-radius: 10px;
+  box-shadow: var(--shadow-neu);
+  border: 1px solid var(--cw);
+  text-align: center;
+}
+
+.winner-line {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

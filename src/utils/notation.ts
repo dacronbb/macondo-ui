@@ -44,7 +44,7 @@ export function formatTilesForDisplay(
  * "8D" = row 7, col 3, across (number first = across)
  * "D8" = row 7, col 3, down (letter first = down)
  */
-function parsePosition(pos: string): { row: number; col: number; isAcross: boolean } | null {
+export function parsePosition(pos: string): { row: number; col: number; isAcross: boolean } | null {
   // Across: number then letter(s), e.g. "8D", "15A"
   const acrossMatch = pos.match(/^(\d+)([A-O])$/);
   if (acrossMatch) {

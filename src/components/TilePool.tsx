@@ -24,6 +24,11 @@ export function TilePool({ state }: TilePoolProps) {
       }
     }
   }
+  // Also subtract own rack — those tiles are seen by the player
+  for (const ch of state.rack) {
+    const key = ch === '?' ? '?' : ch.toUpperCase();
+    used[key] = (used[key] || 0) + 1;
+  }
 
   const remaining: Record<string, number> = {};
   for (const letter of LETTER_ORDER) {
@@ -49,7 +54,7 @@ export function TilePool({ state }: TilePoolProps) {
         borderBottom: '1px solid var(--border)',
         letterSpacing: 0.5,
       }}>
-        {state.bagCount} unseen tiles
+        {state.bagCount} in bag
       </h3>
       <div style={{
         padding: '8px 12px', fontFamily: "'Lexend', sans-serif",

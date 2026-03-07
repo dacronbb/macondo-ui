@@ -27,6 +27,9 @@ export const api = {
   playMove: (coords: string, tiles: string) =>
     request<GameState>('POST', '/game/move', { coords, tiles }),
 
+  scoreMove: (coords: string, tiles: string) =>
+    request<{ score: number }>('POST', '/game/score', { coords, tiles }),
+
   playMoveFromList: (moveIndex: number) =>
     request<GameState>('POST', '/game/move', { moveIndex }),
 
