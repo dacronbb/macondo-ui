@@ -62,7 +62,7 @@ export function ExchangeModal({ rack, onExchange, onCancel, loading }: ExchangeM
             disabled={selectedCount === 0 || loading} style={{
               background: selectedCount > 0 ? 'var(--cw)' : 'var(--bg-raised)',
               color: selectedCount > 0 ? 'var(--tile-bg)' : 'var(--text-disabled)',
-              border: '2px solid ' + (selectedCount > 0 ? 'var(--cw)' : 'var(--border-strong)'),
+              border: 'none',
               borderRadius: 10, padding: '10px 24px',
               fontSize: 14, fontWeight: 600,
               fontFamily: "'Lexend', sans-serif",
@@ -72,7 +72,7 @@ export function ExchangeModal({ rack, onExchange, onCancel, loading }: ExchangeM
           </button>
           <button onClick={onCancel} style={{
             background: 'var(--bg-raised)', color: 'var(--cw)',
-            border: '2px solid var(--cw)', borderRadius: 10, padding: '10px 24px',
+            border: 'none', borderRadius: 10, padding: '10px 24px',
             fontSize: 14, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
             cursor: 'pointer',
           }}>

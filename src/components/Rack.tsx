@@ -9,6 +9,7 @@ const TILE_VALUES: Record<string, number> = {
 interface RackProps {
   localRack: string[];
   cellSize?: number;
+  showControls?: boolean;
   onShuffle?: () => void;
   onRecall?: () => void;
   onRackPointerDown?: (rackIndex: number, e: React.PointerEvent) => void;
@@ -16,7 +17,7 @@ interface RackProps {
 }
 
 export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
-  { localRack, cellSize = 36, onShuffle, onRecall, onRackPointerDown, dragState },
+  { localRack, cellSize = 36, showControls = true, onShuffle, onRecall, onRackPointerDown, dragState },
   ref
 ) {
   const tileSize = Math.round(cellSize * 1.15);
@@ -43,12 +44,14 @@ export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
 
   return (
     <div style={{ display: 'flex', gap: Math.round(cellSize * 0.5), justifyContent: 'center', alignItems: 'center', padding: '12px 0' }}>
-      <button onClick={onRecall} style={iconBtnStyle} title="Recall tiles">
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 3v15" />
-          <path d="M5 13l7 7 7-7" />
-        </svg>
-      </button>
+      {showControls && (
+        <button onClick={onRecall} style={iconBtnStyle} title="Recall tiles">
+          <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v15" />
+            <path d="M5 13l7 7 7-7" />
+          </svg>
+        </button>
+      )}
       <div ref={ref} style={{ display: 'flex', gap: Math.round(cellSize * 0.17) }}>
         {localRack.map((letter, i) => (
           <div
@@ -85,15 +88,17 @@ export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
           </div>
         ))}
       </div>
-      <button onClick={onShuffle} style={iconBtnStyle} title="Shuffle tiles">
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="16 3 21 3 21 8" />
-          <line x1="4" y1="20" x2="21" y2="3" />
-          <polyline points="21 16 21 21 16 21" />
-          <line x1="15" y1="15" x2="21" y2="21" />
-          <line x1="4" y1="4" x2="9" y2="9" />
-        </svg>
-      </button>
+      {showControls && (
+        <button onClick={onShuffle} style={iconBtnStyle} title="Shuffle tiles">
+          <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="16 3 21 3 21 8" />
+            <line x1="4" y1="20" x2="21" y2="3" />
+            <polyline points="21 16 21 21 16 21" />
+            <line x1="15" y1="15" x2="21" y2="21" />
+            <line x1="4" y1="4" x2="9" y2="9" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 });

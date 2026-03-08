@@ -306,17 +306,20 @@ export function Board({ state, selection, placedTiles, cellSize = 36, previewSco
         boxShadow: v('--board-shadow'), lineHeight: 0, background: v('--board-bg'),
       }}>
         <div style={{ display: 'flex' }}>
-          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
+          {/* +1 accounts for the 1px left border on the cell grid */}
+          <div style={{ width: labelSize + 1, height: labelSize, background: v('--board-bg'), flexShrink: 0 }} />
           {Array.from({ length: dim }, (_, col) => (
             <div key={col} style={{
-              width: cellSize, textAlign: 'center', fontSize: Math.round(cellSize * 0.28),
+              width: cellSize, flexShrink: 0,
+              marginLeft: col > 0 ? 1 : 0,  /* match the gap:1 between cells */
+              textAlign: 'center', fontSize: Math.round(cellSize * 0.28),
               color: v('--board-label'), fontWeight: 500, lineHeight: `${labelSize}px`,
               background: v('--board-bg'),
             }}>
               {String.fromCharCode(65 + col)}
             </div>
           ))}
-          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg') }} />
+          <div style={{ width: labelSize, height: labelSize, background: v('--board-bg'), flexShrink: 0 }} />
         </div>
         <div style={{ display: 'flex' }}>
           <div style={{ display: 'flex', flexDirection: 'column', background: v('--board-bg') }}>

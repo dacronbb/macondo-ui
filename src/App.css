@@ -93,13 +93,12 @@
   cursor: pointer;
   background: var(--bg-raised);
   color: var(--cw);
-  border: 2px solid var(--cw);
+  border: none;
   box-shadow: var(--shadow-neu-sm);
 }
 
 .action-btn:disabled {
   color: var(--text-disabled);
-  border-color: var(--border-strong);
   box-shadow: none;
   cursor: not-allowed;
 }
@@ -107,13 +106,36 @@
 .action-btn-primary {
   background: var(--cw);
   color: var(--bg-raised);
+}
+
+.action-btn-outline {
+  /* inherits everything from base — no overrides needed */
+}
+
+.woogles-input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-neu-inset);
+  outline: none;
+}
+
+.woogles-input::placeholder {
+  color: var(--text-subtle);
+}
+
+.woogles-input:focus {
   border-color: var(--cw);
 }
 
 .action-btn-primary:disabled {
   background: var(--bg-raised);
   color: var(--text-disabled);
-  border-color: var(--border-strong);
   box-shadow: none;
 }
 
@@ -160,14 +182,25 @@
   margin: 4px 0;
 }
 
+@keyframes winner-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .winner-module {
-  margin-top: 16px;
   padding: 10px 14px;
   background: var(--bg-raised);
   border-radius: 10px;
   box-shadow: var(--shadow-neu);
   border: 1px solid var(--cw);
   text-align: center;
+  animation: winner-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .winner-line {
@@ -175,6 +208,38 @@
   font-weight: 500;
   color: var(--text);
   white-space: nowrap;
+}
+
+/* Navigation circle buttons (analyze mode) */
+.nav-circle-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  padding: 0;
+}
+
+.nav-circle-active {
+  background: var(--bg-raised);
+  color: var(--cw);
+  box-shadow: var(--shadow-neu-sm);
+}
+
+.nav-circle-inactive {
+  background: var(--bg-raised);
+  color: var(--text-subtle);
+  box-shadow: var(--shadow-neu-sm);
+}
+
+.nav-circle-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 
 @media (max-width: 900px) {

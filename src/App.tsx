@@ -8,6 +8,7 @@ import { MoveList } from './components/MoveList';
 import { Scoresheet } from './components/Scoresheet';
 import { Settings } from './components/Settings';
 import { ExchangeModal } from './components/ExchangeModal';
+import { AnalyzeModal } from './components/AnalyzeModal';
 import { BlankPickerModal } from './components/BlankPickerModal';
 import { DragGhost } from './components/DragGhost';
 import { Toast } from './components/Toast';
@@ -24,6 +25,8 @@ function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const toastIdRef = useRef(0);
   const [analyzeMode, setAnalyzeMode] = useState(false);
+  const [navIndex, setNavIndex] = useState(0);
+
   const showToast = useCallback((text: string) => {
     setToasts(prev => {
       const existing = prev.find(t => t.text === text);
@@ -37,6 +40,7 @@ function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
   const [statusMsg, setStatusMsg] = useState('');
+  const [showAnalyzeModal, setShowAnalyzeModal] = useState(false);
 
   // Settings state
   const [lexicon, setLexicon] = useState('CSW24');
@@ -167,6 +171,45 @@ function App() {
     }
   }, [withLoading, lexicon, challengeRule, clearBoard]);
 
+  const handleLoadGCGFile = useCallback((file: File) => {
+    setShowAnalyzeModal(false);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const content = ev.target?.result as string;
+      if (!content) return;
+      const s = await withLoading(() => api.loadGame('gcg', content));
+      if (s) {
+        setState(s);
+        setMoves([]);
+        setAnalyzeMode(true);
+        clearBoard();
+        let h: EventInfo[] = [];
+        try { h = await api.getHistory(); setHistory(h); } catch {}
+        const ns = await withLoading(() => api.navigate('last'));
+        if (ns) { setState(ns); setNavIndex(h.length - 1); setStatusMsg('Game loaded for analysis'); }
+      }
+    };
+    reader.readAsText(file);
+  }, [withLoading, clearBoard]);
+
+  const handleLoadWoogles = useCallback(async (raw: string) => {
+    if (!raw) return;
+    setShowAnalyzeModal(false);
+    // Accept full URL (woogles.io/game/ID) or bare ID
+    const id = raw.replace(/^.*\/game\//, '');
+    const s = await withLoading(() => api.loadGame('woogles', undefined, id));
+    if (s) {
+      setState(s);
+      setMoves([]);
+      setAnalyzeMode(true);
+      clearBoard();
+      let h: EventInfo[] = [];
+      try { h = await api.getHistory(); setHistory(h); } catch {}
+      const ns = await withLoading(() => api.navigate('last'));
+      if (ns) { setState(ns); setNavIndex(h.length - 1); setStatusMsg(`Woogles game ${id} loaded`); }
+    }
+  }, [withLoading, clearBoard]);
+
   const handleGenerate = useCallback(async () => {
     const m = await withLoading(() => api.generate(15));
     if (m) {
@@ -289,16 +332,19 @@ function App() {
     if (s) {
       setState(s);
       setMoves([]);
-      setStatusMsg(`Navigated: ${action}`);
+      if (action === 'first') setNavIndex(0);
+      else if (action === 'last') setNavIndex(history.length - 1);
+      else if (action === 'prev') setNavIndex(i => Math.max(0, i - 1));
+      else if (action === 'next') setNavIndex(i => Math.min(history.length - 1, i + 1));
     }
-  }, [withLoading]);
+  }, [withLoading, history.length]);
 
   const handleNavigateToTurn = useCallback(async (turn: number) => {
     const s = await withLoading(() => api.navigateToTurn(turn));
     if (s) {
       setState(s);
       setMoves([]);
-      setStatusMsg(`Jumped to turn ${turn}`);
+      setNavIndex(turn);
     }
   }, [withLoading]);
 
@@ -321,6 +367,7 @@ function App() {
     setMoves([]);
     clearBoard();
     setAnalyzeMode(false);
+    setNavIndex(0);
     setStatusMsg('');
   }, [clearBoard]);
 
@@ -663,7 +710,7 @@ function App() {
 
   // Auto-play for bot when it's maCATdo's turn
   useEffect(() => {
-    if (!state || loading) return;
+    if (!state || loading || analyzeMode) return;
     if (state.playState !== 'PLAYING') return;
     const currentPlayer = state.playerNames[state.onTurn];
     if (currentPlayer !== 'maCATdo') return;
@@ -684,7 +731,7 @@ function App() {
 
   // Auto-pass to resolve WAITING_FOR_FINAL_PASS → triggers endOfGameCalcs and END_RACK_PTS event
   useEffect(() => {
-    if (!state || loading) return;
+    if (!state || loading || analyzeMode) return;
     if (state.playState !== 'WAITING_FOR_FINAL_PASS') return;
     const timer = setTimeout(async () => {
       const s = await withLoading(() => api.playPass());
@@ -698,8 +745,33 @@ function App() {
     return () => clearTimeout(timer);
   }, [state, loading, withLoading, refreshHistory, clearBoard]);
 
+  // Auto-enter analyze mode when game ends
+  useEffect(() => {
+    const gameOver = state?.playState === 'GAME_OVER';
+    if (!gameOver || analyzeMode) return;
+    setAnalyzeMode(true);
+    clearBoard();
+    setNavIndex(history.length - 1);
+  }, [state?.playState, analyzeMode, history.length, clearBoard]);
+
   const isPlaying = state?.playState === 'PLAYING';
   const isGameOver = state?.playState === 'GAME_OVER';
+  // Show analyze UI the instant the game ends — don't wait for the auto-enter effect
+  const effectiveAnalyzeMode = analyzeMode || isGameOver;
+  // When game just ended but analyzeMode state not yet set, treat nav as being at the last turn
+  const effectiveNavIndex = analyzeMode ? navIndex : history.length - 1;
+
+  // Winner text — computed synchronously so banner and nav buttons appear in the same render
+  let winnerText = '';
+  if (isGameOver && state) {
+    const idx = state.scores[0] > state.scores[1] ? 0 : state.scores[1] > state.scores[0] ? 1 : -1;
+    winnerText = idx === -1
+      ? `Draw! Final score: ${state.scores[0]} – ${state.scores[1]}`
+      : `${state.playerNames[idx]} wins. Final score: ${state.scores[idx]} – ${state.scores[1 - idx]}`;
+  }
+
+  const atFirst = effectiveNavIndex <= 0;
+  const atLast = history.length === 0 || effectiveNavIndex >= history.length - 1;
   const lastEvent = history.length > 0 ? history[history.length - 1] : null;
   const canChallenge = isPlaying && !!lastEvent?.position && state?.challengeRule !== 'VOID';
 
@@ -736,54 +808,65 @@ function App() {
             />
           </div>
           <div ref={bottomRef}>
-          {state && (isPlaying || analyzeMode) && (
-            <Rack
-              ref={rackRef}
-              localRack={localRack}
-              cellSize={cellSize}
-              onShuffle={handleShuffle}
-              onRecall={handleRecall}
-              onRackPointerDown={onRackPointerDown}
-              dragState={dragState}
-            />
-          )}
-
-          {isGameOver && !analyzeMode && (() => {
-            const winnerIdx = state.scores[0] > state.scores[1] ? 0 : state.scores[1] > state.scores[0] ? 1 : -1;
-            const winnerLine = winnerIdx === -1
-              ? `Draw! Final score: ${state.scores[0]} – ${state.scores[1]}`
-              : `${state.playerNames[winnerIdx]} wins. Final score: ${state.scores[winnerIdx]} – ${state.scores[1 - winnerIdx]}`;
-            return (
-              <div className="winner-module">
-                <span className="winner-line">{winnerLine}</span>
+          {state && (isPlaying || effectiveAnalyzeMode) && (
+            isGameOver ? (
+              // Winner banner occupies the same height as the rack row so the button row never shifts
+              <div style={{ height: Math.round(cellSize * 1.15) + 24, display: 'flex', alignItems: 'center' }}>
+                <div className="winner-module" style={{ flex: 1, marginBottom: 0 }}>
+                  <span className="winner-line">{winnerText}</span>
+                </div>
               </div>
-            );
-          })()}
+            ) : (
+              <Rack
+                ref={rackRef}
+                localRack={localRack}
+                cellSize={cellSize}
+                showControls={!effectiveAnalyzeMode}
+                onShuffle={handleShuffle}
+                onRecall={handleRecall}
+                onRackPointerDown={onRackPointerDown}
+                dragState={dragState}
+              />
+            )
+          )}
 
           {/* Action bar */}
           <div className="action-bar" ref={optionsRef}>
             {!state ? (
               <div className="action-bar-inner">
+                <button className="action-btn action-btn-outline" onClick={() => setShowAnalyzeModal(true)} disabled={loading}>
+                  Analyze
+                </button>
                 <button className="action-btn action-btn-primary" onClick={handleNewGame} disabled={loading}>
-                  Start Game
+                  Start game
                 </button>
               </div>
-            ) : (isGameOver && !analyzeMode) ? (
+            ) : effectiveAnalyzeMode ? (
               <div className="action-bar-inner">
-                <button className="action-btn" onClick={handleExport} disabled={loading}>Export GCG</button>
-                <button className="action-btn" onClick={() => { setAnalyzeMode(true); clearBoard(); }}>Analyze</button>
-                <button className="action-btn" onClick={handleExit} disabled={loading}>Exit</button>
-                <button className="action-btn action-btn-primary" onClick={handleNewGame} disabled={loading}>Rematch</button>
-              </div>
-            ) : analyzeMode ? (
-              <div className="action-bar-inner">
-                <button className="action-btn" onClick={() => handleNavigate('first')} disabled={loading}>|&lt;</button>
-                <button className="action-btn" onClick={() => handleNavigate('prev')} disabled={loading}>&lt; Prev</button>
-                <button className="action-btn" onClick={() => handleNavigate('next')} disabled={loading}>Next &gt;</button>
-                <button className="action-btn" onClick={() => handleNavigate('last')} disabled={loading}>&gt;|</button>
-                <button className="action-btn action-btn-primary" onClick={() => { setAnalyzeMode(false); clearBoard(); }}>Done</button>
-              </div>
-            ) : (
+                  <button className="action-btn action-btn-outline" onClick={handleExport} disabled={loading}>Export</button>
+                  <button className={`nav-circle-btn${atFirst ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('first')} disabled={loading || atFirst} title="First">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="11 17 6 12 11 7" /><polyline points="18 17 13 12 18 7" />
+                    </svg>
+                  </button>
+                  <button className={`nav-circle-btn${atFirst ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('prev')} disabled={loading || atFirst} title="Previous">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
+                  <button className={`nav-circle-btn${atLast ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('next')} disabled={loading || atLast} title="Next">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                  <button className={`nav-circle-btn${atLast ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('last')} disabled={loading || atLast} title="Last">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" />
+                    </svg>
+                  </button>
+                  <button className="action-btn action-btn-primary" onClick={handleExit}>Done</button>
+                </div>
+            ) : (isPlaying && !analyzeMode) ? (
               <div className="action-bar-inner">
                 <button className="action-btn" onClick={() => setShowOptions(!showOptions)} disabled={loading}>
                   Options
@@ -807,7 +890,7 @@ function App() {
                   Play
                 </button>
               </div>
-            )}
+            ) : null}
             {showOptions && (
               <div className="options-dropdown">
                 <button className="option-item" onClick={() => { handleNewGame(); setShowOptions(false); }} disabled={loading}>
@@ -883,10 +966,12 @@ function App() {
                 onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
                 disabled={moves.length === 0 && (loading || (!isPlaying && !analyzeMode))}
                 style={{
-                  background: 'none', border: 'none', color: 'var(--cw)',
+                  background: 'var(--bg-raised)', border: 'none', color: 'var(--cw)',
                   fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
                   cursor: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'not-allowed' : 'pointer',
-                  padding: '8px 12px', opacity: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 0.5 : 1,
+                  padding: '6px 12px', borderRadius: 8,
+                  boxShadow: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'none' : 'var(--shadow-neu-sm)',
+                  color: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'var(--text-disabled)' : 'var(--cw)',
                 }}
               >
                 {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
@@ -900,6 +985,15 @@ function App() {
           </div>}
         </div>
       </div>
+
+      {showAnalyzeModal && (
+        <AnalyzeModal
+          onWoogles={handleLoadWoogles}
+          onGCG={handleLoadGCGFile}
+          onCancel={() => setShowAnalyzeModal(false)}
+          loading={loading}
+        />
+      )}
 
       {showExchange && state && (
         <ExchangeModal

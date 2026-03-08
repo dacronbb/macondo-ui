@@ -72,7 +72,7 @@ export function Settings({ currentRule, currentLexicon, lexicons, theme, colorwa
         onClick={() => setOpen(!open)}
         style={{
           background: 'var(--bg-raised)', color: 'var(--cw)',
-          border: '2px solid var(--cw)', borderRadius: 10, padding: '10px 16px',
+          border: 'none', borderRadius: 10, padding: '10px 16px',
           cursor: 'pointer', fontSize: 13, fontWeight: 600,
           display: 'flex', alignItems: 'center', gap: 6,
           boxShadow: 'var(--shadow-neu-sm)',
