@@ -258,7 +258,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
     if (el) el.scrollTop = el.scrollHeight;
   }, [events.length]);
 
-  const rowHeight = containerWidth > 0 ? containerWidth / 4 : 80;
+  const rowHeight = containerWidth > 0 ? containerWidth / 6 : 54;
 
   return (
     <div ref={containerRef} className="panel-section" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
