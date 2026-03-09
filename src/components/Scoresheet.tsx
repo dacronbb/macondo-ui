@@ -48,6 +48,7 @@ function isChallengeBonus(evt: EventInfo): boolean {
 
 function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[] {
   const cells: DisplayCell[] = [];
+  const lastCumulative = [0, 0]; // track last cumulative per player to compute deltas
   let i = 0;
 
   while (i < events.length) {
@@ -156,9 +157,10 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       });
       i++;
     } else if (evt.type === 'END_RACK_PTS') {
+      const bonus = evt.cumulative - lastCumulative[evt.playerIndex];
       cells.push({
         description: `Tiles: ${evt.rack || ''}`,
-        scoreText: evt.endRackPoints ? `+${evt.endRackPoints}` : '',
+        scoreText: bonus > 0 ? `+${bonus}` : '',
         rack: undefined,
         cumulative: evt.cumulative,
         playerIndex: evt.playerIndex,
@@ -167,9 +169,10 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       });
       i++;
     } else if (evt.type === 'END_RACK_PENALTY') {
+      const penalty = evt.cumulative - lastCumulative[evt.playerIndex];
       cells.push({
         description: `Tiles: ${evt.rack || ''}`,
-        scoreText: evt.lostScore ? `-${evt.lostScore}` : '',
+        scoreText: penalty < 0 ? String(penalty) : '',
         rack: undefined,
         cumulative: evt.cumulative,
         playerIndex: evt.playerIndex,
@@ -190,6 +193,8 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       });
       i++;
     }
+    // Track last cumulative per player for delta calculations
+    lastCumulative[evt.playerIndex] = evt.cumulative;
   }
 
   return cells;
@@ -258,7 +263,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
     if (el) el.scrollTop = el.scrollHeight;
   }, [events.length]);
 
-  const rowHeight = containerWidth > 0 ? containerWidth / 6 : 54;
+  const rowHeight = containerWidth > 0 ? containerWidth / (containerWidth > 500 ? 12 : 6) : 48;
 
   return (
     <div ref={containerRef} className="panel-section" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
