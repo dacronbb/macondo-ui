@@ -960,13 +960,13 @@ function App() {
 
           {/* Bottom zone: generated moves — aligned with rack + action bar */}
           {!isGameOver && <div className="panel-section" style={{ marginTop: 16, height: bottomHeight ? bottomHeight - 16 : undefined, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-              <h3 style={{ borderBottom: 'none' }}>Generated moves</h3>
+            <div style={{ display: 'flex', alignItems: 'center', borderBottom: moves.length > 0 && showMoves ? '1px solid var(--border)' : 'none', flexShrink: 0, paddingRight: 12 }}>
+              <h3 style={{ borderBottom: 'none', flex: 1, fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Generated moves</h3>
               <button
                 onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
                 disabled={moves.length === 0 && (loading || (!isPlaying && !analyzeMode))}
                 style={{
-                  background: 'var(--bg-raised)', border: 'none', color: 'var(--cw)',
+                  background: 'var(--bg)', border: 'none',
                   fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
                   cursor: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'not-allowed' : 'pointer',
                   padding: '6px 12px', borderRadius: 8,

@@ -270,18 +270,19 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
             padding: '8px 12px',
             borderRight: pi === 0 ? '1px solid var(--border)' : undefined,
           }}>
-            <span style={{
-              fontWeight: onTurn === pi ? 700 : 600,
-              color: onTurn === pi ? 'var(--cw)' : 'var(--text-secondary)',
-              fontSize: 13, letterSpacing: 0.5,
-            }}>
-              {onTurn === pi ? '\u25B6 ' : ''}{playerNames[pi]}
-            </span>
-            <span style={{
-              fontSize: 10, color: 'var(--text-subtle)',
-              background: 'var(--bg)', borderRadius: 8, padding: '2px 6px',
-            }}>
-              25:00
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 700, color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)', fontSize: 15 }}>
+                {onTurn === pi && !gameOver ? '\u25B6 ' : ''}{playerNames[pi]}
+              </span>
+              <span style={{
+                fontSize: 10, background: 'var(--bg)', borderRadius: 8, padding: '2px 6px',
+                color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text-subtle)',
+              }}>
+                25:00
+              </span>
+            </div>
+            <span style={{ fontSize: 15, fontWeight: 700, color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)' }}>
+              {state?.scores[pi] ?? 0}
             </span>
           </div>
         ))}
@@ -323,7 +324,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
                           <span style={{ fontSize: 12, color: 'var(--text-subtle)', letterSpacing: 1 }}>
                             {cell.rack || ''}
                           </span>
-                          <span style={{ fontSize: 15, color: 'var(--cw)', fontWeight: 700 }}>
+                          <span style={{ fontSize: 15, color: 'var(--text)', fontWeight: 700 }}>
                             {cell.cumulative}
                           </span>
                         </div>
