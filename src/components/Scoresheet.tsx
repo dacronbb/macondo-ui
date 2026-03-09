@@ -271,24 +271,28 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {[0, 1].map(pi => (
           <div key={pi} style={{
-            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px 12px',
+            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+            padding: '6px 12px', gap: 2,
             borderRight: pi === 0 ? '1px solid var(--border)' : undefined,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 700, color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)', fontSize: 15 }}>
-                {onTurn === pi && !gameOver ? '\u25B6 ' : ''}{playerNames[pi]}
-              </span>
+            <span style={{
+              fontWeight: 700, fontSize: 15,
+              color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {onTurn === pi && !gameOver ? '\u25B6 ' : ''}{playerNames[pi]}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{
                 fontSize: 10, background: 'var(--bg)', borderRadius: 8, padding: '2px 6px',
                 color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text-subtle)',
               }}>
                 25:00
               </span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)' }}>
+                {state?.scores[pi] ?? 0}
+              </span>
             </div>
-            <span style={{ fontSize: 15, fontWeight: 700, color: onTurn === pi && !gameOver ? 'var(--cw)' : 'var(--text)' }}>
-              {state?.scores[pi] ?? 0}
-            </span>
           </div>
         ))}
       </div>
@@ -356,6 +360,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
           <div style={{ flexShrink: 0, borderTop: '1px solid var(--border)', padding: '8px 12px' }}>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexWrap: 'wrap', gap: '4px 8px',
               marginBottom: 6,
             }}>
               <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>

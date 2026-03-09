@@ -522,19 +522,25 @@ function App() {
 
   // Dynamic board sizing
   const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
   useEffect(() => {
-    const onResize = () => setViewportHeight(window.innerHeight);
+    const onResize = () => { setViewportHeight(window.innerHeight); setViewportWidth(window.innerWidth); };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const cellSize = useMemo(() => {
-    const dim = 15;
-    const overhead = 32 + 54 + 48 + 32;
-    const availableHeight = viewportHeight - overhead;
-    const computed = Math.floor(availableHeight / (dim + 1));
-    return Math.max(24, Math.min(computed, 48));
-  }, [viewportHeight]);
+    // Board: ~15.5cs + 16px | Rack: ~1.15cs + 24px | Action bar: ~54px fixed | App padding: 64px
+    // Total height needed: ~16.65cs + 158 = viewportHeight → cs = (vh - 158) / 16.65
+    const byHeight = Math.floor((viewportHeight - 158) / 16.65);
+    // Two-col (>1100px): reserve 280px side panel + 64px padding + 32px gap + 15px labels
+    // Single-col (≤1100px): full width minus 32px padding (smaller padding in media query)
+    const byWidth = viewportWidth > 1100
+      ? Math.floor((viewportWidth - 400) / 16)
+      : Math.floor((viewportWidth - 32) / 16);
+    const computed = Math.min(byHeight, byWidth);
+    return Math.max(24, Math.min(computed, 60));
+  }, [viewportHeight, viewportWidth]);
 
   const { dragState, onRackPointerDown, onBoardPointerDown } = useDragAndDrop({
     boardRef,
@@ -931,7 +937,7 @@ function App() {
 
         <div className="side-panel">
           {/* Top zone: sCraBBle header + scoresheet — same height as board */}
-          <div style={{ height: boardHeight || undefined, display: 'flex', flexDirection: 'column', minHeight: 0, flexShrink: 0 }}>
+          <div style={{ height: boardHeight || undefined, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, flexShrink: 0, overflow: 'hidden' }}>
             <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>

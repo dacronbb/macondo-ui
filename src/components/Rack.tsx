@@ -43,7 +43,7 @@ export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
     : undefined;
 
   return (
-    <div style={{ display: 'flex', gap: Math.round(cellSize * 0.5), justifyContent: 'center', alignItems: 'center', padding: '12px 0' }}>
+    <div style={{ display: 'flex', gap: Math.round(cellSize * 0.5), justifyContent: 'center', alignItems: 'center', padding: '20px 0 4px' }}>
       {showControls && (
         <button onClick={onRecall} style={iconBtnStyle} title="Recall tiles">
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
