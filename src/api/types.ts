@@ -55,6 +55,12 @@ export interface PlacedTile {
   rackIndex: number;   // original index in localRack for returns
 }
 
+export interface BoggleGameState {
+  board: string[][];
+  size: 4 | 5;
+  validWords: string[];
+}
+
 export interface APIResponse<T> {
   ok: boolean;
   data?: T;

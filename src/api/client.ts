@@ -1,4 +1,4 @@
-import type { APIResponse, GameState, MoveInfo, AIPlayResult, EventInfo } from './types';
+import type { APIResponse, GameState, MoveInfo, AIPlayResult, EventInfo, BoggleGameState } from './types';
 
 const BASE = '/api';
 
@@ -71,4 +71,9 @@ export const api = {
 
   setSettings: (challengeRule: string) =>
     request<GameState>('POST', '/game/settings', { challengeRule }),
+
+  boggle: {
+    newGame: (size: 4 | 5, lexicon: string) =>
+      request<BoggleGameState>('POST', '/boggle/new', { size, lexicon }),
+  },
 };

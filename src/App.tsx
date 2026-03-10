@@ -7,6 +7,8 @@ import { Rack } from './components/Rack';
 import { MoveList } from './components/MoveList';
 import { Scoresheet } from './components/Scoresheet';
 import { Settings } from './components/Settings';
+import { GameSwitcher } from './components/GameSwitcher';
+import { BoggleGame } from './components/boggle/BoggleGame';
 import { ExchangeModal } from './components/ExchangeModal';
 import { AnalyzeModal } from './components/AnalyzeModal';
 import { BlankPickerModal } from './components/BlankPickerModal';
@@ -17,6 +19,7 @@ import { useDragAndDrop } from './hooks/useDragAndDrop';
 import './App.css';
 
 function App() {
+  const [currentGame, setCurrentGame] = useState<'scrabble' | 'boggle'>('scrabble');
   const [state, setState] = useState<GameState | null>(null);
   const [moves, setMoves] = useState<MoveInfo[]>([]);
   const [history, setHistory] = useState<EventInfo[]>([]);
@@ -703,6 +706,14 @@ function App() {
     return () => window.removeEventListener('keydown', handleGlobalKey);
   }, [selection, placedTiles, moveValid, handleSubmitTiledMove, handleRecall, resolveTypedLetter, state?.board]);
 
+  const handleSwitchGame = useCallback((game: 'scrabble' | 'boggle') => {
+    if (game === currentGame) return;
+    if (game === 'boggle' && state !== null) {
+      if (!window.confirm('Abandon current Scrabble game?')) return;
+    }
+    setCurrentGame(game);
+  }, [currentGame, state]);
+
   const handleChangeRule = useCallback(async (rule: string) => {
     setChallengeRule(rule);
     if (state) {
@@ -797,6 +808,21 @@ function App() {
     return () => obs.disconnect();
   }, [cellSize, state]);
 
+
+  if (currentGame === 'boggle') {
+    return (
+      <BoggleGame
+        lexicon={lexicon}
+        lexicons={lexicons}
+        onChangeLexicon={setLexicon}
+        theme={theme}
+        colorway={colorway}
+        onChangeTheme={setTheme}
+        onChangeColorway={setColorway}
+        onSwitchGame={setCurrentGame}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -939,9 +965,7 @@ function App() {
           {/* Top zone: sCraBBle header + scoresheet — same height as board */}
           <div style={{ height: boardHeight || undefined, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, flexShrink: 0, overflow: 'hidden' }}>
             <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <h1>s<span style={{ color: 'var(--cw)' }}>C</span>ra<span style={{ color: 'var(--cw)' }}>BB</span>le</h1>
-              </div>
+              <GameSwitcher current="scrabble" onChange={handleSwitchGame} />
               <Settings
                 currentRule={state?.challengeRule || challengeRule}
                 currentLexicon={lexicon}

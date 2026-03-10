@@ -15,12 +15,23 @@ const selectStyle: React.CSSProperties = {
   color: 'var(--text)',
   border: '1px solid var(--border-strong)',
   borderRadius: 8,
-  padding: '6px 8px',
+  padding: '6px 28px 6px 8px',
   fontSize: 14,
   cursor: 'pointer',
   outline: 'none',
   boxShadow: 'var(--shadow-neu-inset)',
+  appearance: 'none',
+  WebkitAppearance: 'none',
 };
+
+const selectArrow = (
+  <svg
+    width="10" height="10" viewBox="0 0 12 12"
+    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fill: 'var(--cw)', pointerEvents: 'none' }}
+  >
+    <polygon points="2,3 10,3 6,9" />
+  </svg>
+);
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
@@ -32,26 +43,28 @@ const labelStyle: React.CSSProperties = {
 };
 
 const COLORWAYS = [
-  { value: 'green', label: 'Green', color: '#00975B' },
-  { value: 'blue', label: 'Blue', color: '#006797' },
-  { value: 'orange', label: 'Orange', color: '#e65100' },
-  { value: 'pink', label: 'Pink', color: '#970058' },
+  { value: 'green',  label: 'Green',  light: '#00975B', dark: '#00cc7a' },
+  { value: 'blue',   label: 'Blue',   light: '#006797', dark: '#3db8e8' },
+  { value: 'orange', label: 'Orange', light: '#e65100', dark: '#ff8a3d' },
+  { value: 'pink',   label: 'Pink',   light: '#970058', dark: '#e0007a' },
 ];
 
 interface SettingsProps {
-  currentRule: string;
+  currentRule?: string;
   currentLexicon: string;
   lexicons: string[];
   theme: string;
   colorway: string;
-  onChangeRule: (rule: string) => void;
+  onChangeRule?: (rule: string) => void;
   onChangeLexicon: (lex: string) => void;
   onChangeTheme: (theme: string) => void;
   onChangeColorway: (colorway: string) => void;
   loading: boolean;
+  boggleBoardSize?: 4 | 5;
+  onChangeBoardSize?: (size: 4 | 5) => void;
 }
 
-export function Settings({ currentRule, currentLexicon, lexicons, theme, colorway, onChangeRule, onChangeLexicon, onChangeTheme, onChangeColorway, loading }: SettingsProps) {
+export function Settings({ currentRule, currentLexicon, lexicons, theme, colorway, onChangeRule, onChangeLexicon, onChangeTheme, onChangeColorway, loading, boggleBoardSize, onChangeBoardSize }: SettingsProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -99,8 +112,8 @@ export function Settings({ currentRule, currentLexicon, lexicons, theme, colorwa
               <button key={t} onClick={() => onChangeTheme(t)} style={{
                 flex: 1, padding: '6px 0', borderRadius: 8, border: 'none',
                 fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                background: theme === t ? 'var(--accent)' : 'var(--bg-raised)',
-                color: theme === t ? '#fff' : 'var(--text-secondary)',
+                background: theme === t ? 'var(--cw)' : 'var(--bg-raised)',
+                color: theme === t ? 'var(--bg-raised)' : 'var(--cw)',
                 boxShadow: theme === t ? 'none' : 'var(--shadow-neu-sm)',
               }}>
                 {t === 'light' ? 'Light' : 'Dark'}
@@ -111,44 +124,77 @@ export function Settings({ currentRule, currentLexicon, lexicons, theme, colorwa
           {/* Colorway picker */}
           <label style={labelStyle}>Colorway</label>
           <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-            {COLORWAYS.map(cw => (
-              <button key={cw.value} onClick={() => onChangeColorway(cw.value)} style={{
-                flex: 1, padding: '6px 0', borderRadius: 8, border: 'none',
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                background: colorway === cw.value ? cw.color : 'var(--bg-raised)',
-                color: colorway === cw.value ? '#fff' : 'var(--text-secondary)',
-                boxShadow: colorway === cw.value ? 'none' : 'var(--shadow-neu-sm)',
-              }}>
-                {cw.label}
-              </button>
-            ))}
+            {COLORWAYS.map(cw => {
+              const cwColor = theme === 'dark' ? cw.dark : cw.light;
+              return (
+                <button key={cw.value} onClick={() => onChangeColorway(cw.value)} style={{
+                  flex: 1, padding: '6px 0', borderRadius: 8, border: 'none',
+                  fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  background: colorway === cw.value ? cwColor : 'var(--bg-raised)',
+                  color: colorway === cw.value ? 'var(--bg-raised)' : cwColor,
+                  boxShadow: colorway === cw.value ? 'none' : 'var(--shadow-neu-sm)',
+                }}>
+                  {cw.label}
+                </button>
+              );
+            })}
           </div>
 
           <label style={labelStyle}>Lexicon</label>
-          <select
-            value={currentLexicon}
-            onChange={e => onChangeLexicon(e.target.value)}
-            disabled={loading}
-            style={selectStyle}
-          >
-            {lexicons.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
+          <div style={{ position: 'relative' }}>
+            <select
+              value={currentLexicon}
+              onChange={e => onChangeLexicon(e.target.value)}
+              disabled={loading}
+              style={selectStyle}
+            >
+              {lexicons.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {selectArrow}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4, marginBottom: 12, lineHeight: 1.4 }}>
-            Takes effect on next New Game
+            Takes effect on new game
           </div>
 
-          <label style={labelStyle}>Challenge Rule</label>
-          <select
-            value={currentRule}
-            onChange={e => onChangeRule(e.target.value)}
-            disabled={loading}
-            style={selectStyle}
-          >
-            {CHALLENGE_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-          </select>
-          <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 6, lineHeight: 1.4 }}>
-            {current.description}
-          </div>
+          {boggleBoardSize !== undefined && onChangeBoardSize ? (
+            <>
+              <label style={labelStyle}>Board size</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {([4, 5] as const).map(s => (
+                  <button key={s} onClick={() => onChangeBoardSize(s)} style={{
+                    flex: 1, padding: '6px 0', borderRadius: 8, border: 'none',
+                    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    background: boggleBoardSize === s ? 'var(--cw)' : 'var(--bg-raised)',
+                    color: boggleBoardSize === s ? 'var(--bg-raised)' : 'var(--cw)',
+                    boxShadow: boggleBoardSize === s ? 'none' : 'var(--shadow-neu-sm)',
+                  }}>
+                    {s}×{s}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 4, lineHeight: 1.4 }}>
+                Takes effect on new game
+              </div>
+            </>
+          ) : currentRule !== undefined && onChangeRule ? (
+            <>
+              <label style={labelStyle}>Challenge Rule</label>
+              <div style={{ position: 'relative' }}>
+                <select
+                  value={currentRule}
+                  onChange={e => onChangeRule(e.target.value)}
+                  disabled={loading}
+                  style={selectStyle}
+                >
+                  {CHALLENGE_RULES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+                {selectArrow}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-subtle)', marginTop: 6, lineHeight: 1.4 }}>
+                Takes effect on new game. {current.description}
+              </div>
+            </>
+          ) : null}
         </div>
       )}
     </div>
