@@ -10,6 +10,7 @@ interface RackProps {
   localRack: string[];
   cellSize?: number;
   showControls?: boolean;
+  showRecall?: boolean;
   onShuffle?: () => void;
   onRecall?: () => void;
   onRackPointerDown?: (rackIndex: number, e: React.PointerEvent) => void;
@@ -17,7 +18,7 @@ interface RackProps {
 }
 
 export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
-  { localRack, cellSize = 36, showControls = true, onShuffle, onRecall, onRackPointerDown, dragState },
+  { localRack, cellSize = 36, showControls = true, showRecall, onShuffle, onRecall, onRackPointerDown, dragState },
   ref
 ) {
   const tileSize = Math.round(cellSize * 1.15);
@@ -44,7 +45,7 @@ export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
 
   return (
     <div style={{ display: 'flex', gap: Math.round(cellSize * 0.5), justifyContent: 'center', alignItems: 'center', padding: '20px 0 4px' }}>
-      {showControls && (
+      {(showControls || showRecall) && (
         <button onClick={onRecall} style={iconBtnStyle} title="Recall tiles">
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 3v15" />

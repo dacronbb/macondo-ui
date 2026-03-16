@@ -23,6 +23,17 @@ export interface MoveInfo {
   equity: number;
   leave: string;
   tilesPlayed?: number;
+  winPct?: number;
+}
+
+export interface SimStatus {
+  isRunning: boolean;
+  iterations: number;
+}
+
+export interface SimSettings {
+  plies: number;
+  stoppingCondition: number; // 0=none,1=90%,2=95%,3=98%,4=99%,5=99.9%
 }
 
 export interface AIPlayResult {

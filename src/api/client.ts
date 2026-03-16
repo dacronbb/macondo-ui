@@ -1,4 +1,4 @@
-import type { APIResponse, GameState, MoveInfo, AIPlayResult, EventInfo, BoggleGameState } from './types';
+import type { APIResponse, GameState, MoveInfo, AIPlayResult, EventInfo, BoggleGameState, SimStatus } from './types';
 
 const BASE = '/api';
 
@@ -71,6 +71,17 @@ export const api = {
 
   setSettings: (challengeRule: string) =>
     request<GameState>('POST', '/game/settings', { challengeRule }),
+
+  sim: {
+    start: (plies: number, stoppingCondition: number) =>
+      request<{ status: string }>('POST', '/sim/start', { plies, stoppingCondition }),
+    stop: () =>
+      request<{ status: string }>('POST', '/sim/stop'),
+    status: () =>
+      request<SimStatus>('GET', '/sim/status'),
+    results: () =>
+      request<MoveInfo[]>('GET', '/sim/results'),
+  },
 
   boggle: {
     newGame: (size: 4 | 5, lexicon: string) =>

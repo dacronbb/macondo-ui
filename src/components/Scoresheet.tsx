@@ -1,12 +1,24 @@
 import { useRef, useState, useEffect } from 'react';
 import type { EventInfo, GameState } from '../api/types';
 
+const PencilIcon = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+);
+
 interface ScoresheetProps {
   events: EventInfo[];
   state: GameState | null;
   statusMsg: string;
   onNavigate: (turn: number) => void;
   gameOver?: boolean;
+  currentTurn?: number;
+  notes?: Record<number, string>;
+  onNoteClick?: (turn: number) => void;
+  onSelectPlay?: (turn: number, position: string, rawTiles: string, rack: string) => void;
+  selectedTurn?: number | null;
 }
 
 function formatPlayedTiles(playedTiles: string, wordsFormed?: string[]): string {
@@ -40,6 +52,8 @@ interface DisplayCell {
   playerIndex: number;
   turn: number;
   isPhony: boolean;
+  position?: string;
+  rawTiles?: string;
 }
 
 function isChallengeBonus(evt: EventInfo): boolean {
@@ -74,7 +88,7 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
         cells.push({
           description: playDesc + ' *',
           scoreText: '',
-          rack: !isBotPlayer ? evt.rack : undefined,
+          rack: evt.rack,
           cumulative: next.cumulative,
           playerIndex: evt.playerIndex,
           turn: evt.turn,
@@ -88,22 +102,26 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
         cells.push({
           description: playDesc + ' [challenged]',
           scoreText: `+${evt.score}+${bonus}`,
-          rack: !isBotPlayer ? evt.rack : undefined,
+          rack: evt.rack,
           cumulative: next.cumulative,
           playerIndex: evt.playerIndex,
           turn: evt.turn,
           isPhony: false,
+          position: evt.position,
+          rawTiles: evt.playedTiles,
         });
         i += 2; // skip the bonus event
       } else {
         cells.push({
           description: playDesc,
           scoreText: evt.score > 0 ? `+${evt.score}` : '',
-          rack: !isBotPlayer ? evt.rack : undefined,
+          rack: evt.rack,
           cumulative: evt.cumulative,
           playerIndex: evt.playerIndex,
           turn: evt.turn,
           isPhony: false,
+          position: evt.position,
+          rawTiles: evt.playedTiles,
         });
         i++;
       }
@@ -115,7 +133,7 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       cells.push({
         description: playDesc,
         scoreText: '',
-        rack: !isBotPlayer ? evt.rack : undefined,
+        rack: evt.rack,
         cumulative: evt.cumulative,
         playerIndex: evt.playerIndex,
         turn: evt.turn,
@@ -135,9 +153,9 @@ function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[]
       i++;
     } else if (evt.type === 'EXCHANGE') {
       cells.push({
-        description: isBotPlayer ? `Exchange ${evt.exchanged?.length || 0}` : `Exch. ${evt.exchanged || ''}`,
+        description: evt.exchanged ? `Exch. ${evt.exchanged}` : 'Exch.',
         scoreText: '',
-        rack: !isBotPlayer ? evt.rack : undefined,
+        rack: evt.rack,
         cumulative: evt.cumulative,
         playerIndex: evt.playerIndex,
         turn: evt.turn,
@@ -228,7 +246,7 @@ function computeRemaining(board: string[][], rack: string) {
   return remaining;
 }
 
-export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: ScoresheetProps) {
+export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver, currentTurn, notes, onNoteClick, onSelectPlay, selectedTurn }: ScoresheetProps) {
   const playerNames = state?.playerNames || ['Player 1', 'Player 2'];
   const onTurn = state?.onTurn ?? -1;
 
@@ -309,38 +327,60 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
             const right = p1Cells[ri];
             return (
               <div key={ri} style={{ display: 'flex', borderBottom: '1px solid var(--border)', height: rowHeight }}>
-                {[left, right].map((cell, ci) => (
-                  <div
-                    key={ci}
-                    onClick={cell ? () => onNavigate(cell.turn + 1) : undefined}
-                    style={{
-                      flex: 1, padding: '8px 12px', cursor: cell ? 'pointer' : 'default',
-                      borderRight: ci === 0 ? '1px solid var(--border)' : undefined,
-                      display: 'flex', flexDirection: 'column', justifyContent: 'center',
-                    }}
-                  >
-                    {cell && (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 500 }}>
+                {[left, right].map((cell, ci) => {
+                  const isActive = cell
+                    ? (selectedTurn != null ? cell.turn === selectedTurn : cell.turn + 1 === currentTurn)
+                    : false;
+                  const hasNote = cell ? !!(notes?.[cell.turn]) : false;
+                  const canSelect = !!(cell?.position && cell?.rawTiles && !cell.isPhony && onSelectPlay);
+                  return (
+                    <div
+                      key={ci}
+                      onClick={cell ? () => canSelect
+                        ? onSelectPlay!(cell.turn, cell.position!, cell.rawTiles!, cell.rack || '')
+                        : onNavigate(cell.turn + 1)
+                      : undefined}
+                      style={{
+                        flex: 1, minWidth: 0, padding: '8px 12px', cursor: cell ? 'pointer' : 'default',
+                        borderRight: ci === 0 ? '1px solid var(--border)' : undefined,
+                        display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                        overflow: 'hidden',
+                        background: isActive ? 'var(--tile-last-bg)' : undefined,
+                      }}
+                    >
+                      {cell && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'baseline', columnGap: 4, rowGap: 2 }}>
+                          <span style={{ fontSize: 14, color: isActive ? 'var(--cw)' : 'var(--text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {cell.description}
                           </span>
-                          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4, whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', textAlign: 'right' }}>
                             {cell.scoreText}
                           </span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 2 }}>
-                          <span style={{ fontSize: 12, color: 'var(--text-subtle)', letterSpacing: 1 }}>
-                            {cell.rack || ''}
-                          </span>
-                          <span style={{ fontSize: 15, color: 'var(--text)', fontWeight: 700 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, overflow: 'hidden' }}>
+                            {hasNote && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onNoteClick?.(cell.turn); }}
+                                style={{
+                                  background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                  color: 'var(--cw)', flexShrink: 0, display: 'flex', alignItems: 'center',
+                                }}
+                                title="View note"
+                              >
+                                <PencilIcon />
+                              </button>
+                            )}
+                            <span style={{ fontSize: 12, color: 'var(--text-subtle)', letterSpacing: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {cell.rack || ''}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 15, color: 'var(--text)', fontWeight: 700, textAlign: 'right' }}>
                             {cell.cumulative}
                           </span>
                         </div>
-                      </>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })
@@ -348,7 +388,7 @@ export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver }: S
       </div>
 
       {/* Unseen tiles — pinned at bottom */}
-      {state && !gameOver && (() => {
+      {state && (() => {
         const remaining = computeRemaining(state.board, state.rack);
         let vowelCount = 0, consonantCount = 0;
         for (const letter of LETTER_ORDER) {

@@ -12,6 +12,8 @@ import { BoggleGame } from './components/boggle/BoggleGame';
 import { ExchangeModal } from './components/ExchangeModal';
 import { AnalyzeModal } from './components/AnalyzeModal';
 import { BlankPickerModal } from './components/BlankPickerModal';
+import { SimSettingsModal } from './components/SimSettingsModal';
+import type { SimSettings } from './api/types';
 import { DragGhost } from './components/DragGhost';
 import { Toast } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
@@ -29,6 +31,16 @@ function App() {
   const toastIdRef = useRef(0);
   const [analyzeMode, setAnalyzeMode] = useState(false);
   const [navIndex, setNavIndex] = useState(0);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simIterations, setSimIterations] = useState(0);
+  const [simSettings, setSimSettings] = useState<SimSettings>({ plies: 2, stoppingCondition: 0 });
+  const [showSimSettings, setShowSimSettings] = useState(false);
+  const [generateCount, setGenerateCount] = useState(15);
+  const [notes, setNotes] = useState<Record<number, string>>({});
+  const [showNoteInput, setShowNoteInput] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
+  const [pendingPlacement, setPendingPlacement] = useState<{ position: string; tiles: string; rack: string } | null>(null);
 
   const showToast = useCallback((text: string) => {
     setToasts(prev => {
@@ -88,6 +100,8 @@ function App() {
   const [previewScore, setPreviewScore] = useState<number | null>(null);
   const [moveValid, setMoveValid] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectPlayIdRef = useRef(0); // for cancelling stale handleSelectPlay calls
+  const selectedPlayRackRef = useRef(''); // pre-play rack of the currently selected scoresheet play
 
   // Blank picker state
   const [pendingBlank, setPendingBlank] = useState<{ row: number; col: number; rackIndex: number } | null>(null);
@@ -96,15 +110,18 @@ function App() {
   const boardRef = useRef<HTMLDivElement>(null);
   const rackRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
 
   // Fetch available lexicons on mount
   useEffect(() => {
     api.getLexicons().then(setLexicons).catch(() => {});
   }, []);
 
-  // Initialize localRack from state.rack whenever server state changes
+  // Initialize localRack from state.rack whenever server state changes.
+  // Skip when a scoresheet play is selected — handleSelectPlay sets localRack directly,
+  // and placeOnBoard (via pendingPlacement) finalizes it to the leave.
   useEffect(() => {
-    if (state) {
+    if (state && !selectedPlayRackRef.current) {
       setLocalRack(state.rack.split(''));
     }
   }, [state]);
@@ -222,62 +239,88 @@ function App() {
     }
   }, [withLoading]);
 
-  const handleAddMove = useCallback((index: number) => {
-    if (!state) return;
-    const move = moves.find(m => m.index === index);
-    if (!move || move.action !== 'play' || !move.coords || !move.tiles) return;
+  const handleGenerateMore = useCallback(async () => {
+    const nextCount = generateCount + 15;
+    const m = await withLoading(() => api.generate(nextCount));
+    if (m) {
+      setMoves(m);
+      setGenerateCount(nextCount);
+    }
+  }, [withLoading, generateCount]);
 
-    // Parse coords into selection
-    const acrossMatch = move.coords.match(/^(\d+)([A-O])$/);
-    const downMatch = move.coords.match(/^([A-O])(\d+)$/);
+  const handleReset = useCallback(async () => {
+    setMoves([]);
+    setGenerateCount(15);
+    const m = await withLoading(() => api.generate(15));
+    if (m) setMoves(m);
+  }, [withLoading]);
+
+  const handleSimulate = useCallback(async () => {
+    if (simRunning) {
+      await api.sim.stop().catch(() => {});
+      setSimRunning(false);
+    } else {
+      try {
+        await api.sim.start(simSettings.plies, simSettings.stoppingCondition);
+        setSimRunning(true);
+        setSimIterations(0);
+      } catch (e) {
+        showToast((e as Error).message);
+      }
+    }
+  }, [simRunning, simSettings, showToast]);
+
+  const placeOnBoard = useCallback((coords: string, tilesStr: string, rackOverride?: string) => {
+    if (!state) return;
+    const acrossMatch = coords.match(/^(\d+)([A-O])$/i);
+    const downMatch = coords.match(/^([A-O])(\d+)$/i);
     let startRow: number, startCol: number, direction: 'across' | 'down';
     if (acrossMatch) {
       startRow = parseInt(acrossMatch[1]) - 1;
-      startCol = acrossMatch[2].charCodeAt(0) - 65;
+      startCol = acrossMatch[2].toUpperCase().charCodeAt(0) - 65;
       direction = 'across';
     } else if (downMatch) {
       startRow = parseInt(downMatch[2]) - 1;
-      startCol = downMatch[1].charCodeAt(0) - 65;
+      startCol = downMatch[1].toUpperCase().charCodeAt(0) - 65;
       direction = 'down';
     } else return;
 
-    // Build PlacedTiles from the move tiles string
     const newPlaced: PlacedTile[] = [];
-    const rackLetters = state.rack.split('');
+    const rackLetters = (rackOverride ?? state.rack).split('');
     const usedRackIndices: number[] = [];
     let r = startRow, c = startCol;
 
-    for (const ch of move.tiles) {
+    for (const ch of tilesStr) {
       if (ch === '.') {
         // play-through — skip
       } else {
-        // Find matching rack tile
         const isBlankPlay = ch === ch.toLowerCase();
         let rackIdx = -1;
         if (isBlankPlay) {
           rackIdx = rackLetters.findIndex((l, i) => l === '?' && !usedRackIndices.includes(i));
         } else {
           rackIdx = rackLetters.findIndex((l, i) => l === ch && !usedRackIndices.includes(i));
-          if (rackIdx === -1) {
-            // Try blank
-            rackIdx = rackLetters.findIndex((l, i) => l === '?' && !usedRackIndices.includes(i));
-          }
+          if (rackIdx === -1) rackIdx = rackLetters.findIndex((l, i) => l === '?' && !usedRackIndices.includes(i));
         }
-        if (rackIdx !== -1) {
-          usedRackIndices.push(rackIdx);
-          newPlaced.push({ row: r, col: c, letter: ch, rackIndex: rackIdx });
-        }
+        if (rackIdx === -1) rackIdx = rackLetters.length + newPlaced.length;
+        usedRackIndices.push(rackIdx);
+        newPlaced.push({ row: r, col: c, letter: ch, rackIndex: rackIdx });
       }
       if (direction === 'across') c++; else r++;
     }
 
     setPlacedTiles(newPlaced);
-    // Update localRack: remove used tiles
-    const newRack = rackLetters.filter((_, i) => !usedRackIndices.includes(i));
-    setLocalRack(newRack);
+    setLocalRack(rackLetters.filter((_, i) => !usedRackIndices.includes(i)));
     setSelection({ row: startRow, col: startCol, direction });
     setTimeout(() => inputRef.current?.focus(), 0);
-  }, [moves, state]);
+  }, [state]);
+
+  const handleAddMove = useCallback((index: number) => {
+    const move = moves.find(m => m.index === index);
+    if (!move || move.action !== 'play' || !move.coords || !move.tiles) return;
+    placeOnBoard(move.coords, move.tiles);
+  }, [moves, placeOnBoard]);
+
 
   const handlePlayMove = useCallback(async (index: number) => {
     const s = await withLoading(() => api.playMoveFromList(index));
@@ -335,14 +378,18 @@ function App() {
     if (s) {
       setState(s);
       setMoves([]);
+      setSelectedTurn(null);
+      selectedPlayRackRef.current = '';
+      clearBoard();
       if (action === 'first') setNavIndex(0);
       else if (action === 'last') setNavIndex(history.length - 1);
       else if (action === 'prev') setNavIndex(i => Math.max(0, i - 1));
       else if (action === 'next') setNavIndex(i => Math.min(history.length - 1, i + 1));
     }
-  }, [withLoading, history.length]);
+  }, [withLoading, history.length, clearBoard]);
 
   const handleNavigateToTurn = useCallback(async (turn: number) => {
+    selectedPlayRackRef.current = '';
     const s = await withLoading(() => api.navigateToTurn(turn));
     if (s) {
       setState(s);
@@ -350,6 +397,30 @@ function App() {
       setNavIndex(turn);
     }
   }, [withLoading]);
+
+  const handleNoteClick = useCallback((turn: number) => {
+    handleNavigateToTurn(turn + 1);
+    setNoteText(notes[turn] || '');
+    setShowNoteInput(true);
+  }, [handleNavigateToTurn, notes]);
+
+  const handleSelectPlay = useCallback(async (turn: number, position: string, tiles: string, rack: string) => {
+    const id = ++selectPlayIdRef.current;
+    clearBoard();
+    setSelectedTurn(turn);
+    // Navigate to the state before this play
+    const navState = await withLoading(() => api.navigateToTurn(turn));
+    if (!navState || selectPlayIdRef.current !== id) return;
+    // Explicitly set rack so analysis generates from the correct pre-play rack
+    const rackState = await withLoading(() => api.setRack(rack));
+    if (selectPlayIdRef.current !== id) return;
+    setState(rackState ?? navState);
+    setMoves([]);
+    setNavIndex(turn);
+    selectedPlayRackRef.current = rack;
+    setLocalRack(rack.split(''));
+    setPendingPlacement({ position, tiles, rack });
+  }, [clearBoard, withLoading]);
 
   const handleExport = useCallback(async () => {
     const result = await withLoading(() => api.exportGCG());
@@ -400,8 +471,10 @@ function App() {
   // Recall tiles from board (clear selection and placed tiles, reset rack)
   const handleRecall = useCallback(() => {
     clearBoard();
-    if (state) {
-      setLocalRack(state.rack.split(''));
+    // In analyze mode with a selected play, restore the pre-play rack
+    const rackSource = selectedPlayRackRef.current || state?.rack || '';
+    if (rackSource) {
+      setLocalRack(rackSource.split(''));
     }
   }, [clearBoard, state]);
 
@@ -771,6 +844,44 @@ function App() {
     setNavIndex(history.length - 1);
   }, [state?.playState, analyzeMode, history.length, clearBoard]);
 
+  // Apply pending tile placement after navigation state settles
+  useEffect(() => {
+    if (!pendingPlacement) return;
+    placeOnBoard(pendingPlacement.position, pendingPlacement.tiles, pendingPlacement.rack);
+    setPendingPlacement(null);
+  }, [pendingPlacement, placeOnBoard]);
+
+  // Poll sim status + results while running
+  useEffect(() => {
+    if (!simRunning) return;
+    const id = setInterval(async () => {
+      try {
+        const status = await api.sim.status();
+        setSimIterations(status.iterations);
+        const results = await api.sim.results();
+        if (results.length > 0) setMoves(results);
+        if (!status.isRunning) {
+          setSimRunning(false);
+          clearInterval(id);
+        }
+      } catch {
+        setSimRunning(false);
+        clearInterval(id);
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [simRunning]);
+
+  // Auto-generate moves when navigating in analyze mode
+  useEffect(() => {
+    const isAnalyze = analyzeMode || state?.playState === 'GAME_OVER';
+    if (!isAnalyze || !state) return;
+    setGenerateCount(15);
+    let cancelled = false;
+    api.generate(15).then(m => { if (!cancelled && m) setMoves(m); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [state, analyzeMode]);
+
   const isPlaying = state?.playState === 'PLAYING';
   const isGameOver = state?.playState === 'GAME_OVER';
   // Show analyze UI the instant the game ends — don't wait for the auto-enter effect
@@ -787,6 +898,18 @@ function App() {
       : `${state.playerNames[idx]} wins. Final score: ${state.scores[idx]} – ${state.scores[1 - idx]}`;
   }
 
+  const currentNoteTurn = effectiveNavIndex - 1;
+  const handleAddNote = useCallback(() => {
+    if (currentNoteTurn < 0) return;
+    if (noteText.trim()) {
+      setNotes(prev => ({ ...prev, [currentNoteTurn]: noteText.trim() }));
+    } else {
+      setNotes(prev => { const n = { ...prev }; delete n[currentNoteTurn]; return n; });
+    }
+    setShowNoteInput(false);
+    setNoteText('');
+  }, [currentNoteTurn, noteText]);
+
   const atFirst = effectiveNavIndex <= 0;
   const atLast = history.length === 0 || effectiveNavIndex >= history.length - 1;
   const lastEvent = history.length > 0 ? history[history.length - 1] : null;
@@ -795,19 +918,33 @@ function App() {
   // Measure board and bottom heights for side panel alignment
   const [boardHeight, setBoardHeight] = useState(0);
   const [bottomHeight, setBottomHeight] = useState(0);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   useEffect(() => {
     const measure = () => {
       if (boardRef.current) setBoardHeight(boardRef.current.offsetHeight);
       if (bottomRef.current) setBottomHeight(bottomRef.current.offsetHeight);
+      if (headerRef.current) setHeaderHeight(headerRef.current.offsetHeight);
     };
     measure();
     const obs = new ResizeObserver(measure);
     if (boardRef.current) obs.observe(boardRef.current);
     if (bottomRef.current) obs.observe(bottomRef.current);
+    if (headerRef.current) obs.observe(headerRef.current);
     return () => obs.disconnect();
   }, [cellSize, state]);
 
+  // In analyze mode, analysis panel takes 2/3 and scoresheet takes 1/3 of combined content area
+  const combinedHeight = boardHeight > 0 && headerHeight > 0 && bottomHeight > 0
+    ? boardHeight - headerHeight + bottomHeight
+    : 0;
+  const topZoneHeight = effectiveAnalyzeMode && combinedHeight > 0
+    ? headerHeight + Math.round(combinedHeight / 3) - 16
+    : boardHeight || undefined;
+  const bottomZoneHeight = effectiveAnalyzeMode && combinedHeight > 0
+    ? Math.round((2 * combinedHeight) / 3)
+    : bottomHeight ? bottomHeight - 16 : undefined;
+  const noteInputHeight = bottomZoneHeight ? Math.round(bottomZoneHeight * 0.45) : 160;
 
   if (currentGame === 'boggle') {
     return (
@@ -854,6 +991,7 @@ function App() {
                 localRack={localRack}
                 cellSize={cellSize}
                 showControls={!effectiveAnalyzeMode}
+                showRecall={effectiveAnalyzeMode}
                 onShuffle={handleShuffle}
                 onRecall={handleRecall}
                 onRackPointerDown={onRackPointerDown}
@@ -961,10 +1099,10 @@ function App() {
           />
         </div>
 
-        <div className="side-panel">
-          {/* Top zone: sCraBBle header + scoresheet — same height as board */}
-          <div style={{ height: boardHeight || undefined, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, flexShrink: 0, overflow: 'hidden' }}>
-            <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
+        <div className="side-panel" style={effectiveAnalyzeMode ? { minWidth: 340 } : undefined}>
+          {/* Top zone: sCraBBle header + scoresheet */}
+          <div style={{ height: topZoneHeight, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, flexShrink: 0, overflow: 'hidden' }}>
+            <header ref={headerRef} className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
               <GameSwitcher current="scrabble" onChange={handleSwitchGame} />
               <Settings
                 currentRule={state?.challengeRule || challengeRule}
@@ -985,31 +1123,174 @@ function App() {
               statusMsg={statusMsg}
               onNavigate={handleNavigateToTurn}
               gameOver={isGameOver}
+              currentTurn={effectiveNavIndex}
+              notes={notes}
+              onNoteClick={handleNoteClick}
+              onSelectPlay={effectiveAnalyzeMode ? handleSelectPlay : undefined}
+              selectedTurn={selectedTurn}
             />
           </div>
 
-          {/* Bottom zone: generated moves — aligned with rack + action bar */}
-          {!isGameOver && <div className="panel-section" style={{ marginTop: 16, height: bottomHeight ? bottomHeight - 16 : undefined, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', borderBottom: moves.length > 0 && showMoves ? '1px solid var(--border)' : 'none', flexShrink: 0, paddingRight: 12 }}>
-              <h3 style={{ borderBottom: 'none', flex: 1, fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Generated moves</h3>
-              <button
-                onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
-                disabled={moves.length === 0 && (loading || (!isPlaying && !analyzeMode))}
-                style={{
-                  background: 'var(--bg)', border: 'none',
-                  fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
-                  cursor: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'not-allowed' : 'pointer',
-                  padding: '6px 12px', borderRadius: 8,
-                  boxShadow: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'none' : 'var(--shadow-neu-sm)',
-                  color: (moves.length === 0 && (loading || (!isPlaying && !analyzeMode))) ? 'var(--text-disabled)' : 'var(--cw)',
-                }}
-              >
-                {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
-              </button>
+          {/* Bottom zone: generated moves / analysis */}
+          {state && (isPlaying || effectiveAnalyzeMode) && <div className="panel-section" style={{ marginTop: 16, height: bottomZoneHeight, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Panel header */}
+            <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: '0 12px' }}>
+              <h3 style={{ borderBottom: 'none', flex: 1, fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: '10px 0' }}>
+                {effectiveAnalyzeMode ? 'Analysis' : 'Generated moves'}
+              </h3>
+              {effectiveAnalyzeMode ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    className={`nav-circle-btn ${currentNoteTurn < 0 ? 'nav-circle-inactive' : 'nav-circle-active'}`}
+                    onClick={() => {
+                      if (showNoteInput) {
+                        setShowNoteInput(false);
+                      } else {
+                        setNoteText(notes[currentNoteTurn] || '');
+                        setShowNoteInput(true);
+                      }
+                    }}
+                    disabled={currentNoteTurn < 0}
+                    title="Add note"
+                    style={{
+                      width: 32, height: 32,
+                      color: notes[currentNoteTurn] || showNoteInput ? 'var(--cw)' : 'var(--cw)',
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                  <button
+                    className={`nav-circle-btn ${simRunning ? 'nav-circle-inactive' : 'nav-circle-active'}`}
+                    onClick={() => setShowSimSettings(true)}
+                    disabled={simRunning}
+                    title="Sim settings"
+                    style={{ width: 32, height: 32 }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={moves.length > 0 && showMoves ? () => setShowMoves(false) : handleGenerate}
+                  disabled={moves.length === 0 && (loading || !isPlaying)}
+                  style={{
+                    background: 'var(--bg)', border: 'none',
+                    fontSize: 12, fontWeight: 600, fontFamily: "'Lexend', sans-serif",
+                    cursor: (moves.length === 0 && (loading || !isPlaying)) ? 'not-allowed' : 'pointer',
+                    padding: '6px 12px', borderRadius: 8,
+                    boxShadow: (moves.length === 0 && (loading || !isPlaying)) ? 'none' : 'var(--shadow-neu-sm)',
+                    color: (moves.length === 0 && (loading || !isPlaying)) ? 'var(--text-disabled)' : 'var(--cw)',
+                  }}
+                >
+                  {moves.length > 0 && showMoves ? 'Hide' : 'Generate'}
+                </button>
+              )}
             </div>
-            {showMoves && (
+
+            {/* Scrollable moves list */}
+            {(effectiveAnalyzeMode || showMoves) && (
               <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-                <MoveList moves={moves} board={state?.board} onPlayMove={handlePlayMove} onAddMove={handleAddMove} />
+                <MoveList
+                  moves={moves}
+                  board={state?.board}
+                  onPlayMove={handlePlayMove}
+                  onAddMove={handleAddMove}
+                  analysisMode={effectiveAnalyzeMode}
+                  loading={loading}
+                />
+                {effectiveAnalyzeMode && moves.length > 0 && (
+                  <div style={{ padding: '8px 12px' }}>
+                    <button
+                      className="action-btn action-btn-outline"
+                      onClick={handleGenerateMore}
+                      disabled={loading || simRunning}
+                      style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}
+                    >
+                      More
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Note input panel — slides up from below scrollable area */}
+            {effectiveAnalyzeMode && (
+              <div style={{
+                flexShrink: 0, overflow: 'hidden',
+                height: showNoteInput ? noteInputHeight : 0,
+                transition: 'height 0.25s ease',
+                borderTop: showNoteInput ? '1px solid var(--border)' : 'none',
+                display: 'flex', flexDirection: 'column',
+              }}>
+                <div style={{ flex: 1, padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <textarea
+                    value={noteText}
+                    onChange={e => setNoteText(e.target.value)}
+                    placeholder="Add a note for this play…"
+                    style={{
+                      flex: 1, resize: 'none', border: 'none', outline: 'none',
+                      background: 'var(--bg)', borderRadius: 8, padding: '8px 10px',
+                      fontSize: 13, fontFamily: "'Lexend', sans-serif", color: 'var(--text)',
+                      boxShadow: 'var(--shadow-neu-inset)',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      className="action-btn action-btn-outline"
+                      onClick={() => { setShowNoteInput(false); setNoteText(''); }}
+                      style={{ fontSize: 12, padding: '5px 12px', flex: 'none' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className={`action-btn ${noteText.trim() ? 'action-btn-primary' : 'action-btn-outline'}`}
+                      onClick={handleAddNote}
+                      style={{ fontSize: 12, padding: '5px 14px', flex: 'none' }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sticky footer — analysis mode only */}
+            {effectiveAnalyzeMode && (
+              <div style={{
+                flexShrink: 0, borderTop: '1px solid var(--border)',
+                padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <button
+                  className="action-btn action-btn-outline"
+                  onClick={handleReset}
+                  disabled={simRunning || loading}
+                  style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}
+                >
+                  Reset
+                </button>
+                <div style={{ flex: 1 }} />
+                <button
+                  className="action-btn action-btn-outline"
+                  onClick={handleSubmitTiledMove}
+                  disabled={!moveValid || loading || simRunning}
+                  style={{ fontSize: 12, padding: '6px 12px', whiteSpace: 'nowrap' }}
+                >
+                  Add play
+                </button>
+                <button
+                  className="action-btn action-btn-primary"
+                  onClick={handleSimulate}
+                  disabled={loading}
+                  style={{ fontSize: 12, padding: '6px 16px', whiteSpace: 'nowrap' }}
+                >
+                  {simRunning ? `Stop (${simIterations.toLocaleString()})` : 'Simulate'}
+                </button>
               </div>
             )}
           </div>}
@@ -1031,6 +1312,14 @@ function App() {
           onExchange={handleExchange}
           onCancel={() => setShowExchange(false)}
           loading={loading}
+        />
+      )}
+
+      {showSimSettings && (
+        <SimSettingsModal
+          settings={simSettings}
+          onSave={s => { setSimSettings(s); setShowSimSettings(false); }}
+          onCancel={() => setShowSimSettings(false)}
         />
       )}
 
