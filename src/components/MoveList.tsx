@@ -46,13 +46,6 @@ const PlayIcon = () => (
   </svg>
 );
 
-const AddIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 21V6" />
-    <path d="M5 13l7-7 7 7" />
-  </svg>
-);
-
 const RemoveIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     <line x1="18" y1="6" x2="6" y2="18" />
@@ -79,6 +72,7 @@ interface MoveListProps {
 export function MoveList({ moves, board, onPlayMove, onAddMove, analysisMode, loading }: MoveListProps) {
 
   const [removed, setRemoved] = useState<Set<number>>(new Set());
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   useEffect(() => { setRemoved(new Set()); }, [moves]);
 
   if (moves.length === 0) {
@@ -101,7 +95,7 @@ export function MoveList({ moves, board, onPlayMove, onAddMove, analysisMode, lo
             <th style={{ ...thStyle, width: 60 }}>Leave</th>
             <th style={{ ...thStyle, width: 56 }}>Equity</th>
             {analysisMode && <th style={{ ...thStyle, width: 44 }}>Win%</th>}
-            <th style={{ ...lastThStyle, width: 66 }} />
+            <th style={{ ...lastThStyle, width: analysisMode ? 36 : 50 }} />
           </tr>
         </thead>
         <tbody>
@@ -109,17 +103,26 @@ export function MoveList({ moves, board, onPlayMove, onAddMove, analysisMode, lo
             const moveText = m.action === 'play'
               ? `${m.coords} ${formatTilesWithBoard(m.tiles || '', m.coords || '', board)}`
               : m.action === 'exchange' ? `exch ${m.tiles}` : m.action;
+            const isPlayable = m.action === 'play' && !!onAddMove;
+            const isHovered = hoveredIndex === m.index;
 
             return (
               <tr
                 key={m.index}
-                style={{ borderBottom: idx < visible.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
-                onDoubleClick={() => onPlayMove(m.index)}
+                onClick={() => isPlayable && onAddMove(m.index)}
+                onMouseEnter={() => isPlayable && setHoveredIndex(m.index)}
+                onMouseLeave={() => setHoveredIndex(null)}
+                style={{
+                  borderBottom: idx < visible.length - 1 ? '1px solid var(--border)' : 'none',
+                  cursor: isPlayable ? 'pointer' : 'default',
+                  background: isHovered ? 'var(--bg)' : 'transparent',
+                  transition: 'background 0.1s',
+                }}
               >
                 <td style={{ ...firstTdStyle, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={moveText}>{moveText}</td>
                 <td style={{ ...tdStyle, color: 'var(--text)' }}>{m.score}</td>
                 <td style={{ ...tdStyle, color: 'var(--text-muted)' }}>{m.leave}</td>
-                <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{m.equity.toFixed(1)}</td>
+                <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{isNaN(m.equity) ? '—' : m.equity.toFixed(1)}</td>
                 {analysisMode && (
                   <td style={{ ...tdStyle, color: m.winPct != null ? 'var(--text)' : 'var(--text-muted)' }}>
                     {m.winPct != null ? `${(m.winPct * 100).toFixed(1)}%` : '—'}
@@ -128,25 +131,16 @@ export function MoveList({ moves, board, onPlayMove, onAddMove, analysisMode, lo
                 <td style={lastTdStyle}>
                   {analysisMode && (
                     <button
-                      onClick={() => setRemoved(prev => new Set(prev).add(m.index))}
-                      style={{ ...iconBtn, marginRight: 3 }}
+                      onClick={e => { e.stopPropagation(); setRemoved(prev => new Set(prev).add(m.index)); }}
+                      style={iconBtn}
                       title="Remove from analysis"
                     >
                       <RemoveIcon />
                     </button>
                   )}
-                  {onAddMove && m.action === 'play' && (
-                    <button
-                      onClick={() => onAddMove(m.index)}
-                      style={{ ...iconBtn, marginRight: 3 }}
-                      title="Add to board"
-                    >
-                      <AddIcon />
-                    </button>
-                  )}
                   {!analysisMode && (
                     <button
-                      onClick={() => onPlayMove(m.index)}
+                      onClick={e => { e.stopPropagation(); onPlayMove(m.index); }}
                       style={iconBtn}
                       title="Play"
                     >

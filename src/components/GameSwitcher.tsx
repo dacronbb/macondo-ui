@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
-type GameId = 'scrabble' | 'boggle';
+type GameId = 'scrabble' | 'boggle' | 'cardbbox';
 
 interface GameDef {
   id: GameId;
@@ -17,6 +17,11 @@ const GAMES: GameDef[] = [
     id: 'boggle',
     // prettier-ignore
     label: <><span style={{ color: 'var(--cw)' }}>CBB</span>oggle</>,
+  },
+  {
+    id: 'cardbbox',
+    // prettier-ignore
+    label: <><span style={{ color: 'var(--cw)' }}>C</span>ard<span style={{ color: 'var(--cw)' }}>BB</span>ox</>,
   },
 ];
 

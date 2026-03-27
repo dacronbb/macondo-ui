@@ -34,6 +34,7 @@ export interface SimStatus {
 export interface SimSettings {
   plies: number;
   stoppingCondition: number; // 0=none,1=90%,2=95%,3=98%,4=99%,5=99.9%
+  inference: string; // known opponent tiles, e.g. "AEI?" — empty = no inference
 }
 
 export interface AIPlayResult {

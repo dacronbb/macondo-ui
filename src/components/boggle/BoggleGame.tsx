@@ -16,7 +16,7 @@ interface BoggleGameProps {
   colorway: string;
   onChangeTheme: (t: string) => void;
   onChangeColorway: (c: string) => void;
-  onSwitchGame: (game: 'scrabble' | 'boggle') => void;
+  onSwitchGame: (game: 'scrabble' | 'boggle' | 'cardbbox') => void;
 }
 
 export function BoggleGame({
@@ -134,7 +134,7 @@ export function BoggleGame({
     submitWord(word);
   }, [phase, submitWord]);
 
-  const handleSwitchGame = useCallback((game: 'scrabble' | 'boggle') => {
+  const handleSwitchGame = useCallback((game: 'scrabble' | 'boggle' | 'cardbbox') => {
     if (game === 'boggle') return;
     if (phase === 'playing') {
       if (!window.confirm('Abandon current Boggle game?')) return;
@@ -146,13 +146,33 @@ export function BoggleGame({
   const timerMins = Math.floor(secondsLeft / 60);
   const timerSecs = String(secondsLeft % 60).padStart(2, '0');
 
-  // Show an idle grid placeholder when no board
-  const displayBoard = board.length > 0
-    ? board
-    : Array.from({ length: activeSize }, () => Array.from({ length: activeSize }, () => ''));
 
   return (
     <div className="app">
+      <div className="app-title-row">
+        <GameSwitcher current="boggle" onChange={handleSwitchGame} />
+        <div style={{ flex: 1 }} />
+        {phase !== 'idle' && (
+          <div style={{
+            fontSize: 28, fontWeight: 700, fontFamily: "'Lexend', sans-serif",
+            color: timerColor, minWidth: 58, textAlign: 'right', letterSpacing: 1,
+          }}>
+            {timerMins}:{timerSecs}
+          </div>
+        )}
+        <Settings
+          currentLexicon={lexicon}
+          lexicons={lexicons}
+          theme={theme}
+          colorway={colorway}
+          onChangeLexicon={onChangeLexicon}
+          onChangeTheme={onChangeTheme}
+          onChangeColorway={onChangeColorway}
+          loading={loading}
+          boggleBoardSize={pendingSize}
+          onChangeBoardSize={setPendingSize}
+        />
+      </div>
       <div className="main-layout">
         {/* Board area */}
         <div className="board-area">
@@ -249,37 +269,6 @@ export function BoggleGame({
 
         {/* Side panel */}
         <div className="side-panel">
-          <header className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
-            <GameSwitcher current="boggle" onChange={handleSwitchGame} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {/* Timer */}
-              {phase !== 'idle' && (
-                <div style={{
-                  fontSize: 28,
-                  fontWeight: 700,
-                  fontFamily: "'Lexend', sans-serif",
-                  color: timerColor,
-                  minWidth: 58,
-                  textAlign: 'right',
-                  letterSpacing: 1,
-                }}>
-                  {timerMins}:{timerSecs}
-                </div>
-              )}
-              <Settings
-                currentLexicon={lexicon}
-                lexicons={lexicons}
-                theme={theme}
-                colorway={colorway}
-                onChangeLexicon={onChangeLexicon}
-                onChangeTheme={onChangeTheme}
-                onChangeColorway={onChangeColorway}
-                loading={loading}
-                boggleBoardSize={pendingSize}
-                onChangeBoardSize={setPendingSize}
-              />
-            </div>
-          </header>
 
           <BoggleWordList
             foundWords={foundWords}

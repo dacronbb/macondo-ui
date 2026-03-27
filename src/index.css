@@ -19,9 +19,9 @@
   --shadow-neu-inset: inset 2px 2px 4px var(--shadow-dark), inset -2px -2px 4px var(--shadow-light);
 
   --text: #333;
-  --text-secondary: #888;
-  --text-muted: #999;
-  --text-subtle: #aaa;
+  --text-secondary: #595959;
+  --text-muted: #616161;
+  --text-subtle: #6b6b6b;
   --text-disabled: #757575;
 
   --border: #ddd;
@@ -43,7 +43,7 @@
 
   --board-bg: #e8e8e8;
   --board-shadow: 3px 3px 6px #d4d4d4, -3px -3px 6px #f8f8f8;
-  --board-label: #999;
+  --board-label: #6b6b6b;
 
   --tw: #7a2e3b;
   --tw-text: #fff;
@@ -77,8 +77,8 @@
 
   --text: #e0e0e0;
   --text-secondary: #999;
-  --text-muted: #777;
-  --text-subtle: #666;
+  --text-muted: #909090;
+  --text-subtle: #8c8c8c;
   --text-disabled: #909090;
 
   --border: #3a3a3e;
@@ -100,7 +100,7 @@
 
   --board-bg: #1a1a1a;
   --board-shadow: 3px 3px 6px #0a0a0a, -3px -3px 6px #161616;
-  --board-label: #666;
+  --board-label: #8c8c8c;
 
   --tw: #8b3a4a;
   --tw-text: #ffcdd2;

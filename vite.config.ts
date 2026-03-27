@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'http://localhost:8088',
         changeOrigin: true,
       },
+      '/wordsearcher': {
+        target: 'http://localhost:8180',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/wordsearcher/, '/api'),
+      },
     },
   },
 })

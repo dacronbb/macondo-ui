@@ -89,7 +89,7 @@ export const Rack = forwardRef<HTMLDivElement, RackProps>(function Rack(
           </div>
         ))}
       </div>
-      {showControls && (
+      {(showControls || showRecall) && (
         <button onClick={onShuffle} style={iconBtnStyle} title="Shuffle tiles">
           <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cw)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="16 3 21 3 21 8" />

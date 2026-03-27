@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from './api/client';
 import type { GameState, MoveInfo, EventInfo, PlacedTile } from './api/types';
-import { Board, toCoords, buildMoveStringFromPlaced, formatPlayThrough, getCursorPos } from './components/Board';
+import { Board, buildMoveStringFromPlaced, formatPlayThrough, getCursorPos } from './components/Board';
 import type { BoardSelection } from './components/Board';
 import { Rack } from './components/Rack';
 import { MoveList } from './components/MoveList';
@@ -9,6 +9,7 @@ import { Scoresheet } from './components/Scoresheet';
 import { Settings } from './components/Settings';
 import { GameSwitcher } from './components/GameSwitcher';
 import { BoggleGame } from './components/boggle/BoggleGame';
+import { CardBBox } from './components/CardBBox';
 import { ExchangeModal } from './components/ExchangeModal';
 import { AnalyzeModal } from './components/AnalyzeModal';
 import { BlankPickerModal } from './components/BlankPickerModal';
@@ -18,22 +19,23 @@ import { DragGhost } from './components/DragGhost';
 import { Toast } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
 import { useDragAndDrop } from './hooks/useDragAndDrop';
+import { RackEditor } from './components/RackEditor';
 import './App.css';
 
 function App() {
-  const [currentGame, setCurrentGame] = useState<'scrabble' | 'boggle'>('scrabble');
+  const [currentGame, setCurrentGame] = useState<'scrabble' | 'boggle' | 'cardbbox'>('scrabble');
   const [state, setState] = useState<GameState | null>(null);
   const [moves, setMoves] = useState<MoveInfo[]>([]);
   const [history, setHistory] = useState<EventInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const toastIdRef = useRef(0);
   const [analyzeMode, setAnalyzeMode] = useState(false);
   const [navIndex, setNavIndex] = useState(0);
   const [simRunning, setSimRunning] = useState(false);
   const [simIterations, setSimIterations] = useState(0);
-  const [simSettings, setSimSettings] = useState<SimSettings>({ plies: 2, stoppingCondition: 0 });
+  const [simSettings, setSimSettings] = useState<SimSettings>({ plies: 2, stoppingCondition: 0, inference: '' });
   const [showSimSettings, setShowSimSettings] = useState(false);
   const [generateCount, setGenerateCount] = useState(15);
   const [notes, setNotes] = useState<Record<number, string>>({});
@@ -101,6 +103,7 @@ function App() {
   const [moveValid, setMoveValid] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectPlayIdRef = useRef(0); // for cancelling stale handleSelectPlay calls
+  const userPlayIndexRef = useRef(-1); // unique negative indices for user-added moves in analyze mode
   const selectedPlayRackRef = useRef(''); // pre-play rack of the currently selected scoresheet play
 
   // Blank picker state
@@ -110,7 +113,7 @@ function App() {
   const boardRef = useRef<HTMLDivElement>(null);
   const rackRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const headerRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
 
   // Fetch available lexicons on mount
   useEffect(() => {
@@ -261,7 +264,7 @@ function App() {
       setSimRunning(false);
     } else {
       try {
-        await api.sim.start(simSettings.plies, simSettings.stoppingCondition);
+        await api.sim.start(simSettings.plies, simSettings.stoppingCondition, simSettings.inference || undefined);
         setSimRunning(true);
         setSimIterations(0);
       } catch (e) {
@@ -374,35 +377,103 @@ function App() {
   }, [withLoading, refreshHistory, clearBoard]);
 
   const handleNavigate = useCallback(async (action: string) => {
-    const s = await withLoading(() => api.navigate(action));
-    if (s) {
-      setState(s);
-      setMoves([]);
-      setSelectedTurn(null);
-      selectedPlayRackRef.current = '';
-      clearBoard();
-      if (action === 'first') setNavIndex(0);
-      else if (action === 'last') setNavIndex(history.length - 1);
-      else if (action === 'prev') setNavIndex(i => Math.max(0, i - 1));
-      else if (action === 'next') setNavIndex(i => Math.min(history.length - 1, i + 1));
+    if (!state) return;
+    setEditingRacks(false);
+    // state.turnNumber is the authoritative turn index (events 0..turnNumber-1 committed).
+    // Use it — not navIndex — to compute where to go next.
+    let newTurn = state.turnNumber;
+    if (action === 'first') newTurn = 0;
+    else if (action === 'last') newTurn = Math.max(0, history.length - 1);
+    else if (action === 'prev') newTurn = Math.max(0, state.turnNumber - 1);
+    else if (action === 'next') newTurn = Math.min(history.length - 1, state.turnNumber + 1);
+
+    const id = ++selectPlayIdRef.current;
+    clearBoard();
+    setSelectedTurn(newTurn);
+    setMoves([]);
+
+    const navState = await withLoading(() => api.navigateToTurn(newTurn));
+    if (!navState || selectPlayIdRef.current !== id) return;
+
+    const evt = history[newTurn];
+    const rack = evt?.rack || navState.rack;
+    const rackState = rack !== navState.rack ? await withLoading(() => api.setRack(rack)) : null;
+    if (selectPlayIdRef.current !== id) return;
+
+    setState(rackState ?? navState);
+    setNavIndex(newTurn);
+    selectedPlayRackRef.current = rack;
+    setLocalRack(rack.split(''));
+
+    if (evt?.position && evt?.playedTiles) {
+      setPendingPlacement({ position: evt.position, tiles: evt.playedTiles, rack });
     }
-  }, [withLoading, history.length, clearBoard]);
+  }, [withLoading, state, history, clearBoard]);
 
   const handleNavigateToTurn = useCallback(async (turn: number) => {
-    selectedPlayRackRef.current = '';
-    const s = await withLoading(() => api.navigateToTurn(turn));
-    if (s) {
-      setState(s);
-      setMoves([]);
-      setNavIndex(turn);
+    const id = ++selectPlayIdRef.current;
+    clearBoard();
+
+    const navState = await withLoading(() => api.navigateToTurn(turn));
+    if (!navState || selectPlayIdRef.current !== id) return;
+
+    const evt = history[turn];
+    const rack = evt?.rack || navState.rack;
+    const rackState = rack !== navState.rack ? await withLoading(() => api.setRack(rack)) : null;
+    if (selectPlayIdRef.current !== id) return;
+
+    setState(rackState ?? navState);
+    setMoves([]);
+    setNavIndex(turn);
+    setSelectedTurn(turn);
+    selectedPlayRackRef.current = rack;
+    setLocalRack(rack.split(''));
+
+    if (evt?.position && evt?.playedTiles) {
+      setPendingPlacement({ position: evt.position, tiles: evt.playedTiles, rack });
     }
-  }, [withLoading]);
+  }, [withLoading, history, clearBoard]);
 
   const handleNoteClick = useCallback((turn: number) => {
     handleNavigateToTurn(turn + 1);
     setNoteText(notes[turn] || '');
     setShowNoteInput(true);
   }, [handleNavigateToTurn, notes]);
+
+  // Rack edit mode
+  const [editingRacks, setEditingRacks] = useState(false);
+  const [editRackOwn, setEditRackOwn] = useState('');
+  const [editRackOpp, setEditRackOpp] = useState('');
+
+  const handleAnnotate = useCallback(async () => {
+    setShowAnalyzeModal(false);
+    const gs = await withLoading(() => api.newGame(lexicon, challengeRule));
+    if (!gs) return;
+    setState(gs);
+    setHistory([]);
+    setMoves([]);
+    setAnalyzeMode(true);
+    setNavIndex(0);
+    setEditRackOwn('');
+    setEditRackOpp('');
+    setEditingRacks(true);
+  }, [lexicon, challengeRule]);
+
+  const handleEditStart = useCallback(() => {
+    const oppIdx = state ? (state.onTurn === 0 ? 1 : 0) : 1;
+    const oppLastEvent = [...history].reverse().find(e => e.playerIndex === oppIdx && e.rack);
+    setEditRackOwn(state?.rack ?? '');
+    setEditRackOpp(oppLastEvent?.rack ?? '');
+    setEditingRacks(true);
+  }, [state, history]);
+
+  const handleEditSave = useCallback(async () => {
+    if (editRackOwn) {
+      const newState = await api.setRack(editRackOwn);
+      if (newState) setState(newState);
+    }
+    setEditingRacks(false);
+  }, [editRackOwn]);
 
   const handleSelectPlay = useCallback(async (turn: number, position: string, tiles: string, rack: string) => {
     const id = ++selectPlayIdRef.current;
@@ -596,9 +667,11 @@ function App() {
     setPendingBlank(null);
   }, [pendingBlank, placedTiles]);
 
+
   // Dynamic board sizing
   const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
   const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
+  const [headerHeight, setHeaderHeight] = useState(72);
   useEffect(() => {
     const onResize = () => { setViewportHeight(window.innerHeight); setViewportWidth(window.innerWidth); };
     window.addEventListener('resize', onResize);
@@ -606,9 +679,10 @@ function App() {
   }, []);
 
   const cellSize = useMemo(() => {
-    // Board: ~15.5cs + 16px | Rack: ~1.15cs + 24px | Action bar: ~54px fixed | App padding: 64px
-    // Total height needed: ~16.65cs + 158 = viewportHeight → cs = (vh - 158) / 16.65
-    const byHeight = Math.floor((viewportHeight - 158) / 16.65);
+    // Board: ~15.5cs + 16px | Rack: ~1.15cs + 24px | Action bar: ~54px fixed | bottom padding: 32px
+    // Plus measured title row height
+    const fixedOverhead = 154 + (headerHeight || 72);
+    const byHeight = Math.floor((viewportHeight - fixedOverhead) / 16.65);
     // Two-col (>1100px): reserve 280px side panel + 64px padding + 32px gap + 15px labels
     // Single-col (≤1100px): full width minus 32px padding (smaller padding in media query)
     const byWidth = viewportWidth > 1100
@@ -616,7 +690,7 @@ function App() {
       : Math.floor((viewportWidth - 32) / 16);
     const computed = Math.min(byHeight, byWidth);
     return Math.max(24, Math.min(computed, 60));
-  }, [viewportHeight, viewportWidth]);
+  }, [viewportHeight, viewportWidth, headerHeight]);
 
   const { dragState, onRackPointerDown, onBoardPointerDown } = useDragAndDrop({
     boardRef,
@@ -659,6 +733,19 @@ function App() {
       return;
     }
     const { coords, tiles } = move;
+    if (analyzeMode || state.playState === 'GAME_OVER') {
+      // In analyze mode: score the move and add it to the list for comparison; don't commit to game
+      const result = await withLoading(() => api.scoreMove(coords, tiles));
+      if (result) {
+        const idx = userPlayIndexRef.current--;
+        setMoves(prev => [...prev, {
+          index: idx, action: 'play', coords, tiles,
+          score: result.score, equity: NaN, leave: '—',
+        }]);
+        clearBoard();
+      }
+      return;
+    }
     const s = await withLoading(() => api.playMove(coords, tiles));
     if (s) {
       setState(s);
@@ -671,7 +758,7 @@ function App() {
         setStatusMsg(`Played: ${coords} ${formatPlayThrough(tiles, coords, state?.board)}`);
       }
     }
-  }, [placedTiles, state, withLoading, refreshHistory, clearBoard]);
+  }, [placedTiles, state, analyzeMode, withLoading, refreshHistory, clearBoard]);
 
   // Update selection direction based on placed tiles
   useEffect(() => {
@@ -779,10 +866,13 @@ function App() {
     return () => window.removeEventListener('keydown', handleGlobalKey);
   }, [selection, placedTiles, moveValid, handleSubmitTiledMove, handleRecall, resolveTypedLetter, state?.board]);
 
-  const handleSwitchGame = useCallback((game: 'scrabble' | 'boggle') => {
+  const handleSwitchGame = useCallback((game: 'scrabble' | 'boggle' | 'cardbbox') => {
     if (game === currentGame) return;
     if (game === 'boggle' && state !== null) {
       if (!window.confirm('Abandon current Scrabble game?')) return;
+    }
+    if (game === 'cardbbox' && state !== null) {
+      if (!window.confirm('Leave current Scrabble game?')) return;
     }
     setCurrentGame(game);
   }, [currentGame, state]);
@@ -915,10 +1005,29 @@ function App() {
   const lastEvent = history.length > 0 ? history[history.length - 1] : null;
   const canChallenge = isPlaying && !!lastEvent?.position && state?.challengeRule !== 'VOID';
 
-  // Measure board and bottom heights for side panel alignment
+  // Global hotkeys for in-game actions (1–6)
+  useEffect(() => {
+    const handleHotkey = (e: KeyboardEvent) => {
+      if (!isPlaying) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      switch (e.key) {
+        case '1': if (moveValid) { e.preventDefault(); handleSubmitTiledMove(); } break;
+        case '2': e.preventDefault(); handlePass(); break;
+        case '3': if (canChallenge) { e.preventDefault(); handleChallenge(); } break;
+        case '4': e.preventDefault(); setShowExchange(true); break;
+        case '5': e.preventDefault(); handleRecall(); break;
+        case '6': e.preventDefault(); handleShuffle(); break;
+      }
+    };
+    window.addEventListener('keydown', handleHotkey);
+    return () => window.removeEventListener('keydown', handleHotkey);
+  }, [isPlaying, moveValid, canChallenge, handleSubmitTiledMove, handlePass, handleChallenge, handleRecall, handleShuffle]);
+
+  // Measure board, bottom, and header heights for layout
   const [boardHeight, setBoardHeight] = useState(0);
   const [bottomHeight, setBottomHeight] = useState(0);
-  const [headerHeight, setHeaderHeight] = useState(0);
 
   useEffect(() => {
     const measure = () => {
@@ -935,16 +1044,31 @@ function App() {
   }, [cellSize, state]);
 
   // In analyze mode, analysis panel takes 2/3 and scoresheet takes 1/3 of combined content area
-  const combinedHeight = boardHeight > 0 && headerHeight > 0 && bottomHeight > 0
-    ? boardHeight - headerHeight + bottomHeight
+  const combinedHeight = boardHeight > 0 && bottomHeight > 0
+    ? boardHeight + bottomHeight
     : 0;
   const topZoneHeight = effectiveAnalyzeMode && combinedHeight > 0
-    ? headerHeight + Math.round(combinedHeight / 3) - 16
+    ? Math.round(combinedHeight / 3)
     : boardHeight || undefined;
   const bottomZoneHeight = effectiveAnalyzeMode && combinedHeight > 0
     ? Math.round((2 * combinedHeight) / 3)
     : bottomHeight ? bottomHeight - 16 : undefined;
   const noteInputHeight = bottomZoneHeight ? Math.round(bottomZoneHeight * 0.45) : 160;
+
+  if (currentGame === 'cardbbox') {
+    return (
+      <CardBBox
+        onSwitch={handleSwitchGame}
+        lexicon={lexicon}
+        lexicons={lexicons}
+        theme={theme}
+        colorway={colorway}
+        onChangeLexicon={setLexicon}
+        onChangeTheme={setTheme}
+        onChangeColorway={setColorway}
+      />
+    );
+  }
 
   if (currentGame === 'boggle') {
     return (
@@ -963,6 +1087,22 @@ function App() {
 
   return (
     <div className="app">
+      <div ref={headerRef} className="app-title-row">
+        <GameSwitcher current="scrabble" onChange={handleSwitchGame} />
+        <div style={{ flex: 1 }} />
+        <Settings
+          currentRule={state?.challengeRule || challengeRule}
+          currentLexicon={lexicon}
+          lexicons={lexicons}
+          theme={theme}
+          colorway={colorway}
+          onChangeRule={handleChangeRule}
+          onChangeLexicon={setLexicon}
+          onChangeTheme={setTheme}
+          onChangeColorway={setColorway}
+          loading={loading}
+        />
+      </div>
       <div className="main-layout">
         <div className="board-area">
           <div ref={boardRef}>
@@ -985,6 +1125,13 @@ function App() {
                   <span className="winner-line">{winnerText}</span>
                 </div>
               </div>
+            ) : effectiveAnalyzeMode && editingRacks ? (
+              <RackEditor
+                value={editRackOwn}
+                onChange={setEditRackOwn}
+                onSave={handleEditSave}
+                cellSize={cellSize}
+              />
             ) : (
               <Rack
                 ref={rackRef}
@@ -1013,28 +1160,42 @@ function App() {
               </div>
             ) : effectiveAnalyzeMode ? (
               <div className="action-bar-inner">
-                  <button className="action-btn action-btn-outline" onClick={handleExport} disabled={loading}>Export</button>
-                  <button className={`nav-circle-btn${atFirst ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('first')} disabled={loading || atFirst} title="First">
+                  <button className="action-btn action-btn-outline" onClick={handleExport} disabled={loading || editingRacks}>Export</button>
+                  <button className={`nav-circle-btn${(atFirst || editingRacks) ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('first')} disabled={loading || atFirst || editingRacks} title="First">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="11 17 6 12 11 7" /><polyline points="18 17 13 12 18 7" />
                     </svg>
                   </button>
-                  <button className={`nav-circle-btn${atFirst ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('prev')} disabled={loading || atFirst} title="Previous">
+                  <button className={`nav-circle-btn${(atFirst || editingRacks) ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('prev')} disabled={loading || atFirst || editingRacks} title="Previous">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="15 18 9 12 15 6" />
                     </svg>
                   </button>
-                  <button className={`nav-circle-btn${atLast ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('next')} disabled={loading || atLast} title="Next">
+                  {editingRacks ? (
+                    <button className="nav-circle-btn nav-circle-active" onClick={handleEditSave} title="Save rack">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </button>
+                  ) : (
+                    <button className="nav-circle-btn nav-circle-active" onClick={handleEditStart} title="Edit rack">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                  )}
+                  <button className={`nav-circle-btn${(atLast || editingRacks) ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('next')} disabled={loading || atLast || editingRacks} title="Next">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="9 18 15 12 9 6" />
                     </svg>
                   </button>
-                  <button className={`nav-circle-btn${atLast ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('last')} disabled={loading || atLast} title="Last">
+                  <button className={`nav-circle-btn${(atLast || editingRacks) ? ' nav-circle-inactive' : ' nav-circle-active'}`} onClick={() => handleNavigate('last')} disabled={loading || atLast || editingRacks} title="Last">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="13 17 18 12 13 7" /><polyline points="6 17 11 12 6 7" />
                     </svg>
                   </button>
-                  <button className="action-btn action-btn-primary" onClick={handleExit}>Done</button>
+                  <button className="action-btn action-btn-primary" onClick={handleExit} disabled={editingRacks}>Done</button>
                 </div>
             ) : (isPlaying && !analyzeMode) ? (
               <div className="action-bar-inner">
@@ -1102,21 +1263,6 @@ function App() {
         <div className="side-panel" style={effectiveAnalyzeMode ? { minWidth: 340 } : undefined}>
           {/* Top zone: sCraBBle header + scoresheet */}
           <div style={{ height: topZoneHeight, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, flexShrink: 0, overflow: 'hidden' }}>
-            <header ref={headerRef} className="app-header" style={{ flexShrink: 0, paddingBottom: 16 }}>
-              <GameSwitcher current="scrabble" onChange={handleSwitchGame} />
-              <Settings
-                currentRule={state?.challengeRule || challengeRule}
-                currentLexicon={lexicon}
-                lexicons={lexicons}
-                theme={theme}
-                colorway={colorway}
-                onChangeRule={handleChangeRule}
-                onChangeLexicon={setLexicon}
-                onChangeTheme={setTheme}
-                onChangeColorway={setColorway}
-                loading={loading}
-              />
-            </header>
             <Scoresheet
               events={history}
               state={state}
@@ -1135,9 +1281,13 @@ function App() {
           {state && (isPlaying || effectiveAnalyzeMode) && <div className="panel-section" style={{ marginTop: 16, height: bottomZoneHeight, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Panel header */}
             <div style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: '0 12px' }}>
-              <h3 style={{ borderBottom: 'none', flex: 1, fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: '10px 0' }}>
-                {effectiveAnalyzeMode ? 'Analysis' : 'Generated moves'}
-              </h3>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', margin: '10px 0' }}>
+                <h3 style={{ borderBottom: 'none', fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+                  {effectiveAnalyzeMode
+                    ? `Analysis (${simSettings.plies}-ply${simSettings.stoppingCondition > 0 ? `, ${['','90%','95%','98%','99%','99.9%'][simSettings.stoppingCondition]}` : ''}${simSettings.inference ? `, infer ${simSettings.inference}` : ''})`
+                    : 'Generated moves'}
+                </h3>
+              </div>
               {effectiveAnalyzeMode ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button
@@ -1301,6 +1451,7 @@ function App() {
         <AnalyzeModal
           onWoogles={handleLoadWoogles}
           onGCG={handleLoadGCGFile}
+          onAnnotate={handleAnnotate}
           onCancel={() => setShowAnalyzeModal(false)}
           loading={loading}
         />

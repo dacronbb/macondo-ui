@@ -177,7 +177,7 @@ export function buildMoveStringFromPlaced(
   // Verify every placed tile was visited along the word path
   let vr = startRow, vc = startCol;
   const visitedPlaced = new Set<string>();
-  for (const ch of tiles) {
+  for (const _ch of tiles) {
     const key = `${vr},${vc}`;
     if (placedMap.has(key)) visitedPlaced.add(key);
     if (isAcross) vc++; else vr++;

@@ -3,11 +3,12 @@ import { useRef, useState } from 'react';
 interface Props {
   onWoogles: (id: string) => void;
   onGCG: (file: File) => void;
+  onAnnotate: () => void;
   onCancel: () => void;
   loading: boolean;
 }
 
-export function AnalyzeModal({ onWoogles, onGCG, onCancel, loading }: Props) {
+export function AnalyzeModal({ onWoogles, onGCG, onAnnotate, onCancel, loading }: Props) {
   const [wooglesInput, setWooglesInput] = useState('');
   const [gcgFile, setGcgFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -108,13 +109,22 @@ export function AnalyzeModal({ onWoogles, onGCG, onCancel, loading }: Props) {
               </button>
             </div>
           ) : (
-            <button
-              className="action-btn action-btn-outline"
-              onClick={() => fileRef.current?.click()}
-              style={{ width: '100%' }}
-            >
-              Upload .GCG file
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="action-btn action-btn-outline"
+                onClick={() => fileRef.current?.click()}
+                style={{ flex: 1 }}
+              >
+                Upload .GCG file
+              </button>
+              <button
+                className="action-btn action-btn-outline"
+                onClick={onAnnotate}
+                style={{ flex: 1 }}
+              >
+                Annotate
+              </button>
+            </div>
           )}
         </div>
 

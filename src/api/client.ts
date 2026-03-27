@@ -73,8 +73,8 @@ export const api = {
     request<GameState>('POST', '/game/settings', { challengeRule }),
 
   sim: {
-    start: (plies: number, stoppingCondition: number) =>
-      request<{ status: string }>('POST', '/sim/start', { plies, stoppingCondition }),
+    start: (plies: number, stoppingCondition: number, inference?: string) =>
+      request<{ status: string }>('POST', '/sim/start', { plies, stoppingCondition, inference }),
     stop: () =>
       request<{ status: string }>('POST', '/sim/stop'),
     status: () =>

@@ -60,14 +60,14 @@ function isChallengeBonus(evt: EventInfo): boolean {
   return evt.type === 'CHALLENGE_BONUS';
 }
 
-function buildDisplayCells(events: EventInfo[], botIndex: number): DisplayCell[] {
+function buildDisplayCells(events: EventInfo[], _botIndex: number): DisplayCell[] {
   const cells: DisplayCell[] = [];
   const lastCumulative = [0, 0]; // track last cumulative per player to compute deltas
   let i = 0;
 
   while (i < events.length) {
     const evt = events[i];
-    const isBotPlayer = evt.playerIndex === botIndex;
+
 
     // Check what follows this tile placement
     const next = i + 1 < events.length ? events[i + 1] : null;
@@ -246,7 +246,7 @@ function computeRemaining(board: string[][], rack: string) {
   return remaining;
 }
 
-export function Scoresheet({ events, state, statusMsg, onNavigate, gameOver, currentTurn, notes, onNoteClick, onSelectPlay, selectedTurn }: ScoresheetProps) {
+export function Scoresheet({ events, state, statusMsg: _statusMsg, onNavigate, gameOver, currentTurn, notes, onNoteClick, onSelectPlay, selectedTurn }: ScoresheetProps) {
   const playerNames = state?.playerNames || ['Player 1', 'Player 2'];
   const onTurn = state?.onTurn ?? -1;
 
